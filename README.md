@@ -10,6 +10,9 @@
 - JSON request/response handling
 - Custom header support
 
+## Installation
+
+
 
 ## Configuration
 Before using xurl, you need to set up the following environment variables:
