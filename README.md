@@ -1,5 +1,5 @@
 
-# xurl - A curl-like CLI Tool for X (Twitter) API
+# xurl - A curl-like CLI Tool for the X API
 `xurl` is a command-line tool that simplifies making authenticated requests to the X (formerly Twitter) API. It handles OAuth 2.0 authentication automatically and provides a curl-like interface for API interactions.
 
 ## Features
@@ -11,8 +11,9 @@
 - Custom header support
 
 ## Installation
-
-
+```bash
+curl -fsSL https://raw.githubusercontent.com/santiagomed/xurl/main/install.sh | sudo bash
+```
 
 ## Configuration
 Before using xurl, you need to set up the following environment variables:
