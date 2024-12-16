@@ -181,17 +181,23 @@ impl ApiClient {
 mod tests {
     use super::*;
     use mockito::Server;
-
+    use crate::auth::token_store::TokenStore;
+    
     fn setup_env() {
         std::env::set_var("CLIENT_ID", "test");
         std::env::set_var("CLIENT_SECRET", "test");
     }
 
-    fn setup_tests_with_mock_oauth2_token() -> Auth {
+    fn mock_auth() -> Auth {
         let config = Config::from_env().unwrap();
-        let mut auth = Auth::new(config).unwrap();
+        let auth = Auth::new(config)
+            .unwrap()
+            .with_token_store(TokenStore::from_file_path(".xurl_test".into()));
+        auth
+    }
 
-        // Add a mock OAuth2 token
+    fn setup_tests_with_mock_oauth2_token() -> Auth {
+        let mut auth = mock_auth();
         let token_store = auth.get_token_store();
         token_store.save_oauth2_token("test", "fake_token").unwrap();
 
@@ -199,9 +205,9 @@ mod tests {
     }
 
     fn setup_tests_with_mock_oauth1_token() -> Auth {
-        let config = Config::from_env().unwrap();
-        let mut auth = Auth::new(config).unwrap();
-        auth.get_token_store()
+        let mut auth = mock_auth();
+        let token_store = auth.get_token_store();
+        token_store
             .save_oauth1_tokens(
                 "access_token".to_string(),
                 "token_secret".to_string(),
@@ -213,14 +219,13 @@ mod tests {
     }
 
     fn cleanup_token_store() {
-        let config = Config::from_env().unwrap();
-        if let Ok(mut auth) = Auth::new(config) {
-            let token_store = auth.get_token_store();
-            let _ = token_store.clear_all();
-        }
+        let mut auth = mock_auth();
+        let token_store = auth.get_token_store();
+        let _ = token_store.clear_all();
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_successful_get_request_oauth2() {
         setup_env();
         let mut server = Server::new_async().await;
@@ -249,6 +254,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_successful_get_request_oauth1() {
         setup_env();
         let mut server = Server::new_async().await;
@@ -268,13 +274,13 @@ mod tests {
             .send_request("GET", "/2/users/me", &[], None, Some("oauth1"), None)
             .await;
 
-        println!("{:?}", result);
         assert!(result.is_ok());
         mock.assert_async().await;
         cleanup_token_store();
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_error_response() {
         setup_env();
         let mut server = Server::new_async().await;

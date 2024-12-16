@@ -74,6 +74,12 @@ impl Auth {
         })
     }
 
+    #[allow(dead_code)]
+    pub fn with_token_store(mut self, token_store: TokenStore) -> Self {
+        self.token_store = token_store;
+        self
+    }
+
     pub fn oauth1(
         &self,
         method: &str,

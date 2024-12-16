@@ -36,6 +36,10 @@ impl TokenStore {
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".xurl");
 
+        Self::from_file_path(file_path)
+    }
+
+    pub fn from_file_path(file_path: PathBuf) -> Self {
         let store = if file_path.exists() {
             let content = fs::read_to_string(&file_path).unwrap_or_default();
             serde_json::from_str(&content).unwrap_or_else(|_| TokenStore {
