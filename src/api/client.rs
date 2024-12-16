@@ -212,6 +212,14 @@ mod tests {
         auth
     }
 
+    fn cleanup_token_store() {
+        let config = Config::from_env().unwrap();
+        if let Ok(mut auth) = Auth::new(config) {
+            let token_store = auth.get_token_store();
+            let _ = token_store.clear_all();
+        }
+    }
+
     #[tokio::test]
     async fn test_successful_get_request_oauth2() {
         setup_env();
@@ -237,6 +245,7 @@ mod tests {
 
         assert!(result.is_ok());
         mock.assert_async().await;
+        cleanup_token_store();
     }
 
     #[tokio::test]
@@ -262,6 +271,7 @@ mod tests {
         println!("{:?}", result);
         assert!(result.is_ok());
         mock.assert_async().await;
+        cleanup_token_store();
     }
 
     #[tokio::test]
@@ -279,12 +289,13 @@ mod tests {
         let config = Config::from_env().unwrap();
         let client = ApiClient::new(config.clone())
             .with_url(url)
-            .with_auth(Auth::new(config).unwrap());
+            .with_auth(setup_tests_with_mock_oauth2_token());
         let result = client
-            .send_request("GET", "/2/users/me", &[], None, None, None)
+            .send_request("GET", "/2/users/me", &[], None, Some("oauth2"), None)
             .await;
 
         assert!(matches!(result, Err(Error::ApiError(_))));
         mock.assert_async().await;
+        cleanup_token_store();
     }
 }
