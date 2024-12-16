@@ -180,9 +180,9 @@ impl ApiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito::Server;
     use crate::auth::token_store::TokenStore;
-    
+    use mockito::Server;
+
     fn setup_env() {
         std::env::set_var("CLIENT_ID", "test");
         std::env::set_var("CLIENT_SECRET", "test");
