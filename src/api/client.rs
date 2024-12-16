@@ -225,7 +225,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_successful_get_request_oauth2() {
         setup_env();
         let mut server = Server::new_async().await;
@@ -254,7 +253,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_successful_get_request_oauth1() {
         setup_env();
         let mut server = Server::new_async().await;
@@ -280,7 +278,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_error_response() {
         setup_env();
         let mut server = Server::new_async().await;

@@ -26,4 +26,3 @@ webbrowser = "1.0.3"
 
 [dev-dependencies]
 mockito = "1.6.1"
-serial_test = "3.2.0"
