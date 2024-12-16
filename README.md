@@ -1,14 +1,14 @@
-
 # xurl - A curl-like CLI Tool for the X API
-`xurl` is a command-line tool that simplifies making authenticated requests to the X (formerly Twitter) API. It handles OAuth 2.0 authentication automatically and provides a curl-like interface for API interactions.
+
+A command-line tool for interacting with the X (formerly Twitter) API, supporting both OAuth 1.0a and OAuth 2.0 authentication.
 
 ## Features
-- OAuth 2.0 authentication with PKCE
-- Token persistence for multiple users
-- Automatic token refresh
-- Support for all HTTP methods
-- JSON request/response handling
-- Custom header support
+
+- OAuth 2.0 PKCE flow authentication
+- OAuth 1.0a authentication
+- Multiple OAuth 2.0 account support
+- Persistent token storage
+- HTTP request customization (headers, methods, body)
 
 ## Installation
 ```bash
@@ -16,69 +16,94 @@ curl -fsSL https://raw.githubusercontent.com/santiagomed/xurl/main/install.sh | 
 ```
 
 ## Configuration
-Before using xurl, you need to set up the following environment variables:
-```bash
-export CLIENT_ID="your_client_id"
-export CLIENT_SECRET="your_client_secret"
+
+Create a `.env` file with your X API credentials:
+
+```env
+CLIENT_ID=your_client_id
+CLIENT_SECRET=your_client_secret
 ```
 
-Optional environment variables (to override defaults):
-```bash
-export REDIRECT_URI="<your_redirect_uri>"
-export AUTH_URL="<your_auth_url>"
-export TOKEN_URL="<your_token_url>"
-```
+Optional environment variables:
+- `REDIRECT_URI` (default: http://localhost:8080/callback)
+- `AUTH_URL` (default: https://x.com/i/oauth2/authorize)
+- `TOKEN_URL` (default: https://api.x.com/2/oauth2/token)
+- `API_BASE_URL` (default: https://api.x.com)
 
 ## Usage
-Basic usage:
+
+### Authentication
+
+OAuth 2.0 authentication:
 ```bash
-xurl '/2/users/me'
+xurl auth oauth2
 ```
 
-To cache authentication for a specific user, use the `-u` option:
+OAuth 1.0a authentication:
 ```bash
-xurl -u santiagomedr '/2/users/me'
+xurl auth oauth1 --consumer-key KEY --consumer-secret SECRET --access-token TOKEN --token-secret SECRET
 ```
 
-
-POST request with data:
+View authentication status:
 ```bash
-xurl -X POST -d '{"text":"Hello, World!"}' '/2/tweets'
+xurl auth status
 ```
 
-Adding custom headers:
+Clear authentication:
 ```bash
-xurl -H "Content-Type: application/json" '/2/users/me'
+xurl auth clear --all              # Clear all tokens
+xurl auth clear --oauth1           # Clear OAuth 1.0a tokens
+xurl auth clear --oauth2-username USERNAME  # Clear specific OAuth 2.0 token
 ```
 
-## Authentication Flow
-The tool implements OAuth 2.0 with PKCE for secure authentication. When you make your first request:
-1. A browser window opens for X authentication
-2. After authorizing, you'll be redirected back to the local callback server
-3. The token is automatically saved for future use
+### Making Requests
 
+Basic GET request:
+```bash
+xurl /2/users/me
+```
 
-## Code Structure
-- `src/auth/`: OAuth implementation and token management
-- `src/api/`: API client and request handling
-- `src/cli/`: Command-line interface and argument parsing
+Custom HTTP method:
+```bash
+xurl -X POST /2/tweets -d '{"text":"Hello world!"}'
+```
+
+Add headers:
+```bash
+xurl -H "Content-Type: application/json" /2/tweets
+```
+
+Specify authentication type:
+```bash
+xurl --auth oauth2 /2/users/me
+xurl --auth oauth1 /2/tweets
+```
+
+Use specific OAuth 2.0 account:
+```bash
+xurl --username johndoe /2/users/me
+```
+
+## Token Storage
+
+Tokens are stored securely in `~/.xurl` in your home directory.
+
+## Development
+
+The project uses the following structure:
+- `src/main.rs`: Entry point and command handling
+- `src/auth/`: Authentication implementation
+- `src/api/`: API client implementation
+- `src/cli/`: Command-line interface definitions
 - `src/config/`: Configuration management
-- `src/errors/`: Error handling
-
-
-## Error Handling
-- OAuth authentication errors
-- Network and HTTP errors
-- API response errors
-- Configuration errors
-
+- `src/error/`: Error types and handling
 
 ## Testing
-To run tests:
+
+Run the test suite:
 ```bash
 cargo test
 ```
-
 
 ## Contributing
 Contributions are welcome!
@@ -88,15 +113,6 @@ Contributions are welcome!
 3. Commit your changes
 4. Push to the branch
 5. Create a new Pull Request
-
-## Dependencies
-Key dependencies include:
-- `oauth2`: OAuth 2.0 authentication
-- `reqwest`: HTTP client
-- `tokio`: Async runtime
-- `axum`: Web server for OAuth callback
-- `clap`: Command line argument parsing
-- `serde`: Serialization/deserialization
 
 ## License
 This project is open-sourced under the MIT License - see the LICENSE file for details.
