@@ -1,91 +1,89 @@
-use crate::api::client::ApiClient;
-use crate::auth::oauth::OAuth;
-use crate::config::environment::Config;
-use crate::error::Error;
-use clap::Parser;
+use clap::{command, Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "xurl")]
-#[command(about = "curl-like tool for X API", long_about = None)]
+#[command(
+    name = "xurl",
+    about = "Auth enabled curl-like interface for the X API",
+    version,
+    author,
+    propagate_version(true),
+    arg_required_else_help(true)
+)]
 pub struct Cli {
-    /// URL to send request to
-    #[arg(required = true)]
-    url: String,
+    /// Command to execute
+    #[command(subcommand)]
+    pub command: Option<Commands>,
 
-    /// HTTP method
-    #[arg(short = 'X', long, default_value = "GET")]
-    method: String,
+    /// HTTP method (GET by default)
+    #[arg(short = 'X', long)]
+    pub method: Option<String>,
 
-    /// Username for authentication
-    #[arg(short, long)]
-    username: Option<String>,
+    /// URL to request
+    pub url: Option<String>,
 
     /// Request headers
-    #[arg(short = 'H', long)]
-    headers: Vec<String>,
+    #[arg(short = 'H', long = "header")]
+    pub headers: Vec<String>,
 
-    /// Request data
+    /// Request body data
+    #[arg(short = 'd', long = "data")]
+    pub data: Option<String>,
+
+    /// Authentication type (oauth1 or oauth2)
+    #[arg(long = "auth")]
+    pub auth: Option<String>,
+
+    /// Username for OAuth2 authentication
     #[arg(short, long)]
-    data: Option<String>,
+    pub username: Option<String>,
 }
 
-pub async fn execute(args: Cli) -> Result<(), Error> {
-    let config = match Config::from_env() {
-        Ok(config) => config,
-        Err(e) => {
-            match e {
-                Error::MissingEnvVar(var) => eprintln!("Missing environment variable: {}", var),
-                _ => eprintln!("Error: {}", e),
-            }
-            return Err(e);
-        }
-    };
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Authentication management
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommands,
+    },
+}
 
-    let mut oauth = match OAuth::new(config) {
-        Ok(oauth) => oauth,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            return Err(Error::OAuthError(e));
-        }
-    };
+#[derive(Subcommand)]
+pub enum AuthCommands {
+    /// Configure OAuth2 authentication
+    #[command(name = "oauth2")]
+    OAuth2,
 
-    let token = match oauth.get_token(args.username).await {
-        Ok(token) => token,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            return Err(Error::OAuthError(e));
-        }
-    };
+    /// Configure OAuth1 authentication
+    #[command(name = "oauth1")]
+    OAuth1 {
+        #[command(subcommand)]
+        command: OAuth1Commands,
+    },
 
-    let client = ApiClient::new();
+    /// Show authentication status
+    Status,
 
-    let path = if let Some(path) = args.url.strip_prefix("https://api.x.com") {
-        path.to_string()
-    } else {
-        args.url
-    };
+    /// Clear authentication tokens
+    Clear {
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        oauth1: bool,
+        #[arg(long)]
+        oauth2_username: Option<String>,
+    },
+}
 
-    let response = match client
-        .send_request(
-            &args.method,
-            &path,
-            &args.headers,
-            args.data.as_deref(),
-            &token,
-        )
-        .await {
-        Ok(response) => response,
-        Err(e) => {
-            match &e {
-                Error::HttpError(e) => eprintln!("HTTP error: {}", e),
-                Error::ApiError(e) => eprintln!("API error: {}", serde_json::to_string_pretty(e)?),
-                Error::JsonError(e) => eprintln!("JSON deserialization error: {}", e),
-                _ => eprintln!("Error: {}", e),
-            }
-            return Err(e);
-        }
-    };
-
-    println!("{}", serde_json::to_string_pretty(&response)?);
-    Ok(())
+#[derive(Subcommand)]
+pub enum OAuth1Commands {
+    Set {
+        #[arg(long)]
+        consumer_key: String,
+        #[arg(long)]
+        consumer_secret: String,
+        #[arg(long)]
+        access_token: String,
+        #[arg(long)]
+        token_secret: String,
+    },
 }

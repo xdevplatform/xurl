@@ -1,5 +1,5 @@
+use crate::auth::AuthError;
 use thiserror::Error;
-use crate::auth::oauth::OAuthError;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -21,6 +21,6 @@ pub enum Error {
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
 
-    #[error("OAuth error: {0}")]
-    OAuthError(#[from] OAuthError),
+    #[error("Auth error: {0}")]
+    AuthError(#[from] AuthError),
 }
