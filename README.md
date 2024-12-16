@@ -12,7 +12,7 @@ A command-line tool for interacting with the X (formerly Twitter) API, supportin
 
 ## Installation
 ```bash
-curl -fsSL https://raw.githubusercontent.com/santiagomed/xurl/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/xdevplatform/xurl/main/install.sh | sudo bash
 ```
 
 ## Configuration
