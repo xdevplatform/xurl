@@ -17,11 +17,11 @@ curl -fsSL https://raw.githubusercontent.com/xdevplatform/xurl/main/install.sh |
 
 ## Configuration
 
-Create a `.env` file with your X API credentials:
+Add the following to your environment variables:
 
 ```env
-CLIENT_ID=your_client_id
-CLIENT_SECRET=your_client_secret
+export CLIENT_ID=your_client_id
+export CLIENT_SECRET=your_client_secret
 ```
 
 Optional environment variables:
