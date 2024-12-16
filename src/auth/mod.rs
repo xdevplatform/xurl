@@ -203,6 +203,11 @@ impl Auth {
     pub fn first_oauth2_token(&self) -> Option<Token> {
         self.token_store.get_first_oauth2_token()
     }
+
+    #[allow(dead_code)]
+    pub fn get_token_store(&mut self) -> &mut TokenStore {
+        &mut self.token_store
+    }
 }
 
 // OAuth 1.0 helper functions
