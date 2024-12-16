@@ -56,8 +56,14 @@ pub enum AuthCommands {
     /// Configure OAuth1 authentication
     #[command(name = "oauth1")]
     OAuth1 {
-        #[command(subcommand)]
-        command: OAuth1Commands,
+        #[arg(long)]
+        consumer_key: String,
+        #[arg(long)]
+        consumer_secret: String,
+        #[arg(long)]
+        access_token: String,
+        #[arg(long)]
+        token_secret: String,
     },
 
     /// Show authentication status
@@ -71,19 +77,5 @@ pub enum AuthCommands {
         oauth1: bool,
         #[arg(long)]
         oauth2_username: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum OAuth1Commands {
-    Set {
-        #[arg(long)]
-        consumer_key: String,
-        #[arg(long)]
-        consumer_secret: String,
-        #[arg(long)]
-        access_token: String,
-        #[arg(long)]
-        token_secret: String,
     },
 }

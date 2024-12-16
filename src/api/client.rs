@@ -44,10 +44,10 @@ impl ApiClient {
                 Ok(format!("Bearer {}", token))
             }
             None => {
-                if let Some(token) = auth.borrow_mut().oauth2_token() {
+                if let Some(token) = auth.borrow().first_oauth2_token() {
                     match token {
                         Token::OAuth2(token) => Ok(format!("Bearer {}", token)),
-                        _ => Err(Error::AuthError(AuthError::TokenNotFound)),
+                        _ => Err(Error::AuthError(AuthError::WrongTokenFoundInStore)),
                     }
                 } else {
                     let token = auth.borrow_mut().oauth2(None).await?;
@@ -74,10 +74,10 @@ impl ApiClient {
             Some("oauth1") => Ok(auth.borrow().oauth1(method, url, None)?),
             None => {
                 // Try OAuth2 first, then OAuth1, then fetch new OAuth2 token
-                if let Some(token) = auth.borrow().oauth2_token() {
+                if let Some(token) = auth.borrow().first_oauth2_token() {
                     match token {
                         Token::OAuth2(token) => Ok(format!("Bearer {}", token)),
-                        _ => Err(Error::AuthError(AuthError::TokenNotFound)),
+                        _ => Err(Error::AuthError(AuthError::WrongTokenFoundInStore)),
                     }
                 } else if let Ok(oauth1_header) = auth.borrow().oauth1(method, url, None) {
                     Ok(oauth1_header)

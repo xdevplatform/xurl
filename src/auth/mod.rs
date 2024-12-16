@@ -38,9 +38,11 @@ pub enum AuthError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Token not found")]
-    TokenNotFound,
+    TokenNotFound(String),
     #[error("Invalid auth type: {0}")]
     InvalidAuthType(String),
+    #[error("Non-OAuth2 tokens found when looking for OAuth2 token")]
+    WrongTokenFoundInStore,
 }
 
 pub struct Auth {
@@ -84,7 +86,9 @@ impl Auth {
         let token = self
             .token_store
             .get_oauth1_tokens()
-            .ok_or(AuthError::TokenNotFound)?;
+            .ok_or(AuthError::TokenNotFound(
+                "No OAuth1 tokens found".to_string(),
+            ))?;
         let (consumer_key, access_token, consumer_secret, token_secret) = match token {
             Token::OAuth1(token) => (
                 token.consumer_key,
@@ -126,12 +130,17 @@ impl Auth {
     }
 
     pub async fn oauth2(&mut self, username: Option<&str>) -> Result<String, AuthError> {
-        if let Some(ref username) = username {
+        if let Some(username) = username {
             if let Some(token) = self.token_store.get_oauth2_token(username) {
                 match token {
                     Token::OAuth2(token) => return Ok(token),
-                    _ => return Err(AuthError::InvalidToken("Invalid token type".to_string())),
+                    _ => return Err(AuthError::WrongTokenFoundInStore),
                 }
+            } else {
+                return Err(AuthError::TokenNotFound(format!(
+                    "No cached OAuth2 token found for {}",
+                    username
+                )));
             }
         }
 
@@ -191,7 +200,7 @@ impl Auth {
         Ok(token)
     }
 
-    pub fn oauth2_token(&self) -> Option<Token> {
+    pub fn first_oauth2_token(&self) -> Option<Token> {
         self.token_store.get_first_oauth2_token()
     }
 }

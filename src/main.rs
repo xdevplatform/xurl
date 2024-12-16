@@ -7,7 +7,7 @@ mod error;
 
 use api::client::ApiClient;
 use auth::{token_store::TokenStore, Auth};
-use cli::{AuthCommands, Cli, Commands, OAuth1Commands};
+use cli::{AuthCommands, Cli, Commands};
 use config::Config;
 use error::Error;
 
@@ -26,23 +26,21 @@ async fn main() -> Result<(), Error> {
                 println!("OAuth2 authentication successful!");
             }
 
-            AuthCommands::OAuth1 { command } => match command {
-                OAuth1Commands::Set {
-                    consumer_key,
-                    consumer_secret,
+            AuthCommands::OAuth1 {
+                consumer_key,
+                consumer_secret,
+                access_token,
+                token_secret,
+            } => {
+                let mut store = TokenStore::new();
+                store.save_oauth1_tokens(
                     access_token,
                     token_secret,
-                } => {
-                    let mut store = TokenStore::new();
-                    store.save_oauth1_tokens(
-                        access_token,
-                        token_secret,
-                        consumer_key,
-                        consumer_secret,
-                    )?;
-                    println!("OAuth1 credentials saved successfully!");
-                }
-            },
+                    consumer_key,
+                    consumer_secret,
+                )?;
+                println!("OAuth1 credentials saved successfully!");
+            }
 
             AuthCommands::Status => {
                 let store = TokenStore::new();
@@ -75,6 +73,9 @@ async fn main() -> Result<(), Error> {
                 } else if let Some(username) = oauth2_username {
                     store.clear_oauth2_token(&username)?;
                     println!("OAuth2 token cleared for {}!", username);
+                } else {
+                    println!("No authentication cleared! Use --all to clear all authentication.");
+                    std::process::exit(1);
                 }
             }
         }
@@ -101,5 +102,9 @@ async fn main() -> Result<(), Error> {
 
         return Ok(());
     }
-    Ok(())
+
+    println!("No URL provided\n");
+    println!("Usage: xurl [OPTIONS] [URL] [COMMAND]");
+    println!("Try 'xurl --help' for more information.");
+    std::process::exit(1);
 }
