@@ -178,16 +178,27 @@ impl ApiClient {
         let request_builder = self
             .build_request(method, endpoint, headers, data, auth_type, username)
             .await?;
+
         let response = request_builder.send().await?;
 
         let status = response.status();
-        let body: Value = response.json().await?;
 
-        if !status.is_success() {
-            return Err(Error::ApiError(body));
+        match response.json::<serde_json::Value>().await {
+            Ok(res) => {
+                if !status.is_success() {
+                    Err(Error::ApiError(res))
+                } else {
+                    Ok(res)
+                }
+            },
+            Err(_) => {
+                let status = status.to_string();
+                Err(Error::ApiError(serde_json::json!({
+                    "status": status,
+                    "error": "Empty body"
+                })))
+            }
         }
-
-        Ok(body)
     }
 }
 
