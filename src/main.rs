@@ -21,6 +21,13 @@ async fn main() -> Result<(), Error> {
     // Handle auth subcommands
     if let Some(Commands::Auth { command }) = cli.command {
         match command {
+            AuthCommands::App { bearer_token } => {
+                auth.get_token_store()
+                    .save_bearer_token(&bearer_token)
+                    .map_err(|e| Error::AuthError(auth::AuthError::TokenStoreError(e)))?;
+                println!("App authentication successful!");
+            }
+
             AuthCommands::OAuth2 => {
                 auth.oauth2(None).await?;
                 println!("OAuth2 authentication successful!");
@@ -32,13 +39,9 @@ async fn main() -> Result<(), Error> {
                 access_token,
                 token_secret,
             } => {
-                let mut store = TokenStore::new();
-                store.save_oauth1_tokens(
-                    access_token,
-                    token_secret,
-                    consumer_key,
-                    consumer_secret,
-                )?;
+                auth.get_token_store()
+                    .save_oauth1_tokens(access_token, token_secret, consumer_key, consumer_secret)
+                    .map_err(|e| Error::AuthError(auth::AuthError::TokenStoreError(e)))?;
                 println!("OAuth1 credentials saved successfully!");
             }
 
@@ -62,17 +65,28 @@ async fn main() -> Result<(), Error> {
                 all,
                 oauth1,
                 oauth2_username,
+                bearer,
             } => {
-                let mut store = TokenStore::new();
                 if all {
-                    store.clear_all()?;
+                    auth.get_token_store()
+                        .clear_all()
+                        .map_err(|e| Error::AuthError(auth::AuthError::TokenStoreError(e)))?;
                     println!("All authentication cleared!");
                 } else if oauth1 {
-                    store.clear_oauth1_tokens()?;
+                    auth.get_token_store()
+                        .clear_oauth1_tokens()
+                        .map_err(|e| Error::AuthError(auth::AuthError::TokenStoreError(e)))?;
                     println!("OAuth1 tokens cleared!");
                 } else if let Some(username) = oauth2_username {
-                    store.clear_oauth2_token(&username)?;
+                    auth.get_token_store()
+                        .clear_oauth2_token(&username)
+                        .map_err(|e| Error::AuthError(auth::AuthError::TokenStoreError(e)))?;
                     println!("OAuth2 token cleared for {}!", username);
+                } else if bearer {
+                    auth.get_token_store()
+                        .clear_bearer_token()
+                        .map_err(|e| Error::AuthError(auth::AuthError::TokenStoreError(e)))?;
+                    println!("Bearer token cleared!");
                 } else {
                     println!("No authentication cleared! Use --all to clear all authentication.");
                     std::process::exit(1);
