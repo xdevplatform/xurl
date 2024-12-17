@@ -88,8 +88,12 @@ impl ApiClient {
                 // this will allow the user to not have to specify the auth type for each request and
                 // xurl will be able to choose the correct auth type based on the route
                 let token = {
-                    let auth_ref = auth.borrow();
-                    auth_ref.first_oauth2_token()
+                    let mut auth_ref = auth.borrow_mut();
+                    if let Some(username) = username {
+                        auth_ref.get_token_store().get_oauth2_token(username)
+                    } else {
+                        auth_ref.first_oauth2_token()
+                    }
                 };
                 if let Some(token) = token {
                     match token {
@@ -178,6 +182,7 @@ impl ApiClient {
         let request_builder = self
             .build_request(method, endpoint, headers, data, auth_type, username)
             .await?;
+
 
         let response = request_builder.send().await?;
 
