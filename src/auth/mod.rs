@@ -4,6 +4,7 @@ pub mod token_store;
 use crate::auth::listener::listen_for_code;
 use crate::auth::token_store::Token;
 use crate::auth::token_store::TokenStore;
+use crate::auth::token_store::TokenStoreError;
 use crate::config::Config;
 
 use oauth2::basic::BasicClient;
@@ -29,8 +30,6 @@ pub enum AuthError {
     InvalidCode(String),
     #[error("Invalid token: {0}")]
     InvalidToken(String),
-    #[error("Token store error: {0}")]
-    TokenStoreError(String),
     #[error("Authorization error: {0}")]
     AuthorizationError(String),
     #[error("Network error: {0}")]
@@ -43,6 +42,8 @@ pub enum AuthError {
     InvalidAuthType(String),
     #[error("Non-OAuth2 tokens found when looking for OAuth2 token")]
     WrongTokenFoundInStore,
+    #[error("Token store error: {0}")]
+    TokenStoreError(#[from] TokenStoreError),
 }
 
 pub struct Auth {
@@ -199,11 +200,19 @@ impl Auth {
             .ok_or_else(|| AuthError::NetworkError("Missing username field".to_string()))?
             .to_string();
 
-        self.token_store
-            .save_oauth2_token(&username, &token)
-            .map_err(|e| AuthError::TokenStoreError(e.to_string()))?;
+        self.token_store.save_oauth2_token(&username, &token)?;
 
         Ok(token)
+    }
+
+    pub fn bearer_token(&self) -> Option<String> {
+        self.token_store
+            .get_bearer_token()
+            .as_ref()
+            .and_then(|token| match token {
+                Token::Bearer(token) => Some(token.clone()),
+                _ => None,
+            })
     }
 
     pub fn first_oauth2_token(&self) -> Option<Token> {

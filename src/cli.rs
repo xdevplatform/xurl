@@ -49,6 +49,13 @@ pub enum Commands {
 
 #[derive(Subcommand)]
 pub enum AuthCommands {
+    /// Configure app-auth
+    #[command(name = "app")]
+    App {
+        #[arg(long)]
+        bearer_token: String,
+    },
+
     /// Configure OAuth2 authentication
     #[command(name = "oauth2")]
     OAuth2,
@@ -77,5 +84,7 @@ pub enum AuthCommands {
         oauth1: bool,
         #[arg(long)]
         oauth2_username: Option<String>,
+        #[arg(long)]
+        bearer: bool,
     },
 }

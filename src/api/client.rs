@@ -70,9 +70,23 @@ impl ApiClient {
         };
 
         match auth_type.as_deref() {
+            Some("app") => {
+                if let Some(token) = auth.borrow().bearer_token() {
+                    Ok(format!("Bearer {}", token))
+                } else {
+                    Err(Error::AuthError(AuthError::WrongTokenFoundInStore))
+                }
+            }
             Some("oauth2") => self.get_oauth2_token(auth, username).await,
             Some("oauth1") => Ok(auth.borrow().oauth1(method, url, None)?),
             None => {
+                // if no auth type is provided, we are using the first oauth2 token, if it exists
+                // if no oauth2 token is found, we are using the saved oauth1 tokens, if they exist
+                // if no oauth1 tokens are found, we start the oauth2 pkce flow
+                // TODO: we need to have a store of routes that are protected by oauth2 and oauth1
+                // depending on the route, we will prioritize the auth type and use the correct token
+                // this will allow the user to not have to specify the auth type for each request and
+                // xurl will be able to choose the correct auth type based on the route
                 let token = {
                     let auth_ref = auth.borrow();
                     auth_ref.first_oauth2_token()
@@ -218,6 +232,13 @@ mod tests {
         auth
     }
 
+    fn setup_tests_with_mock_app_auth() -> Auth {
+        let mut auth = mock_auth();
+        let token_store = auth.get_token_store();
+        token_store.save_bearer_token("fake_token").unwrap();
+        auth
+    }
+
     fn cleanup_token_store() {
         let mut auth = mock_auth();
         let token_store = auth.get_token_store();
@@ -270,6 +291,31 @@ mod tests {
             .with_auth(setup_tests_with_mock_oauth1_token());
         let result = client
             .send_request("GET", "/2/users/me", &[], None, Some("oauth1"), None)
+            .await;
+
+        assert!(result.is_ok());
+        mock.assert_async().await;
+        cleanup_token_store();
+    }
+
+    #[tokio::test]
+    async fn test_successful_get_request_app_auth() {
+        setup_env();
+        let mut server = Server::new_async().await;
+        let url = server.url();
+        let mock = server
+            .mock("GET", "/2/users/me")
+            .with_status(200)
+            .with_body(r#"{"data":{"id":"123","name":"test"}}"#)
+            .create_async()
+            .await;
+
+        let config = Config::from_env().unwrap();
+        let client = ApiClient::new(config)
+            .with_url(url)
+            .with_auth(setup_tests_with_mock_app_auth());
+        let result = client
+            .send_request("GET", "/2/users/me", &[], None, Some("app"), None)
             .await;
 
         assert!(result.is_ok());

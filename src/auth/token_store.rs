@@ -1,4 +1,3 @@
-use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -20,6 +19,16 @@ pub enum Token {
     OAuth2(String), // access_token
     #[serde(rename = "oauth1")]
     OAuth1(OAuth1Token),
+}
+
+#[derive(thiserror::Error, Debug, Serialize, Deserialize)]
+pub enum TokenStoreError {
+    #[error("JSON serialization error")]
+    JSONSerializationError,
+    #[error("JSON deserialization error")]
+    JSONDeserializationError,
+    #[error("IO error")]
+    IOError,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,7 +69,16 @@ impl TokenStore {
         store
     }
 
-    pub fn save_oauth2_token(&mut self, username: &str, token: &str) -> Result<(), Error> {
+    pub fn save_bearer_token(&mut self, token: &str) -> Result<(), TokenStoreError> {
+        self.bearer_token = Some(Token::Bearer(token.to_string()));
+        self.save_to_file()
+    }
+
+    pub fn save_oauth2_token(
+        &mut self,
+        username: &str,
+        token: &str,
+    ) -> Result<(), TokenStoreError> {
         self.oauth2_tokens
             .insert(username.to_string(), Token::OAuth2(token.to_string()));
         self.save_to_file()
@@ -72,7 +90,7 @@ impl TokenStore {
         token_secret: String,
         consumer_key: String,
         consumer_secret: String,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TokenStoreError> {
         self.oauth1_tokens = Some(Token::OAuth1(OAuth1Token {
             access_token,
             token_secret,
@@ -94,19 +112,29 @@ impl TokenStore {
         self.oauth1_tokens.clone()
     }
 
-    pub fn clear_oauth2_token(&mut self, username: &str) -> Result<(), Error> {
+    pub fn get_bearer_token(&self) -> Option<Token> {
+        self.bearer_token.clone()
+    }
+
+    pub fn clear_oauth2_token(&mut self, username: &str) -> Result<(), TokenStoreError> {
         self.oauth2_tokens.remove(username);
         self.save_to_file()
     }
 
-    pub fn clear_oauth1_tokens(&mut self) -> Result<(), Error> {
+    pub fn clear_oauth1_tokens(&mut self) -> Result<(), TokenStoreError> {
         self.oauth1_tokens = None;
         self.save_to_file()
     }
 
-    pub fn clear_all(&mut self) -> Result<(), Error> {
+    pub fn clear_all(&mut self) -> Result<(), TokenStoreError> {
         self.oauth2_tokens.clear();
         self.oauth1_tokens = None;
+        self.bearer_token = None;
+        self.save_to_file()
+    }
+
+    pub fn clear_bearer_token(&mut self) -> Result<(), TokenStoreError> {
+        self.bearer_token = None;
         self.save_to_file()
     }
 
@@ -118,9 +146,10 @@ impl TokenStore {
         self.oauth1_tokens.is_some()
     }
 
-    fn save_to_file(&self) -> Result<(), Error> {
-        let content = serde_json::to_string(&self)?;
-        fs::write(&self.file_path, content)?;
+    fn save_to_file(&self) -> Result<(), TokenStoreError> {
+        let content =
+            serde_json::to_string(&self).map_err(|_| TokenStoreError::JSONSerializationError)?;
+        fs::write(&self.file_path, content).map_err(|_| TokenStoreError::IOError)?;
         Ok(())
     }
 }
