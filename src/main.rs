@@ -108,6 +108,7 @@ async fn main() -> Result<(), Error> {
                 cli.data.as_deref(),
                 cli.auth.as_deref(),
                 cli.username.as_deref(),
+                cli.verbose,
             )
             .await {
                 Ok(res) => res,

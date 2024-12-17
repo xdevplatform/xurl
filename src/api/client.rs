@@ -121,7 +121,7 @@ impl ApiClient {
         }
     }
 
-    pub async fn build_request(
+pub async fn build_request(
         &self,
         method: &str,
         endpoint: &str,
@@ -178,13 +178,19 @@ impl ApiClient {
         data: Option<&str>,
         auth_type: Option<&str>,
         username: Option<&str>,
+        verbose: bool,
     ) -> Result<serde_json::Value, Error> {
         let request_builder = self
             .build_request(method, endpoint, headers, data, auth_type, username)
             .await?;
 
-
+        let req = request_builder.try_clone().unwrap().build()?;
         let response = request_builder.send().await?;
+
+        if verbose {
+            println!("Request: {:#?}", req);
+            println!("Response: {:#?}", response)
+        }
 
         let status = response.status();
 
