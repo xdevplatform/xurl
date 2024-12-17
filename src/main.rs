@@ -100,7 +100,7 @@ async fn main() -> Result<(), Error> {
         let client = ApiClient::new(config).with_auth(auth);
 
         // Make the request
-        let response = client
+        let response = match client
             .send_request(
                 cli.method.as_deref().unwrap_or("GET"),
                 &url,
@@ -108,9 +108,27 @@ async fn main() -> Result<(), Error> {
                 cli.data.as_deref(),
                 cli.auth.as_deref(),
                 cli.username.as_deref(),
+                cli.verbose,
             )
-            .await?;
+            .await {
+                Ok(res) => res,
+                Err(e) => match e {
+                    Error::ApiError(e) => {
+                        println!("{}", serde_json::to_string_pretty(&e)?);
+                        std::process::exit(1)
+                    },
+                    Error::HttpError(e) => {
+                        println!("{}", e);
+                        std::process::exit(1)
+                    },
+                    _ => {
+                        println!("{}", e);
+                        std::process::exit(1)
+                    }
+                }
+            };
 
+        
         // Pretty print the response
         println!("{}", serde_json::to_string_pretty(&response)?);
 

@@ -88,8 +88,12 @@ impl ApiClient {
                 // this will allow the user to not have to specify the auth type for each request and
                 // xurl will be able to choose the correct auth type based on the route
                 let token = {
-                    let auth_ref = auth.borrow();
-                    auth_ref.first_oauth2_token()
+                    let mut auth_ref = auth.borrow_mut();
+                    if let Some(username) = username {
+                        auth_ref.get_token_store().get_oauth2_token(username)
+                    } else {
+                        auth_ref.first_oauth2_token()
+                    }
                 };
                 if let Some(token) = token {
                     match token {
@@ -117,7 +121,7 @@ impl ApiClient {
         }
     }
 
-    pub async fn build_request(
+pub async fn build_request(
         &self,
         method: &str,
         endpoint: &str,
@@ -174,20 +178,38 @@ impl ApiClient {
         data: Option<&str>,
         auth_type: Option<&str>,
         username: Option<&str>,
+        verbose: bool,
     ) -> Result<serde_json::Value, Error> {
         let request_builder = self
             .build_request(method, endpoint, headers, data, auth_type, username)
             .await?;
+
+        let req = request_builder.try_clone().unwrap().build()?;
         let response = request_builder.send().await?;
 
-        let status = response.status();
-        let body: Value = response.json().await?;
-
-        if !status.is_success() {
-            return Err(Error::ApiError(body));
+        if verbose {
+            println!("Request: {:#?}", req);
+            println!("Response: {:#?}", response)
         }
 
-        Ok(body)
+        let status = response.status();
+
+        match response.json::<serde_json::Value>().await {
+            Ok(res) => {
+                if !status.is_success() {
+                    Err(Error::ApiError(res))
+                } else {
+                    Ok(res)
+                }
+            },
+            Err(_) => {
+                let status = status.to_string();
+                Err(Error::ApiError(serde_json::json!({
+                    "status": status,
+                    "error": "Empty body"
+                })))
+            }
+        }
     }
 }
 

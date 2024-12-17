@@ -36,6 +36,10 @@ pub struct Cli {
     /// Username for OAuth2 authentication
     #[arg(short, long)]
     pub username: Option<String>,
+
+    /// Print verbose information
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 
 #[derive(Subcommand)]
