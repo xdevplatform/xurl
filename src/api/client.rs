@@ -287,7 +287,7 @@ mod tests {
             .with_auth(setup_tests_with_mock_oauth2_token());
 
         let result = client
-            .send_request("GET", "/2/users/me", &[], None, None, None)
+            .send_request("GET", "/2/users/me", &[], None, None, None, false)
             .await;
 
         assert!(result.is_ok());
@@ -312,7 +312,7 @@ mod tests {
             .with_url(url)
             .with_auth(setup_tests_with_mock_oauth1_token());
         let result = client
-            .send_request("GET", "/2/users/me", &[], None, Some("oauth1"), None)
+            .send_request("GET", "/2/users/me", &[], None, Some("oauth1"), None, false)
             .await;
 
         assert!(result.is_ok());
@@ -337,7 +337,7 @@ mod tests {
             .with_url(url)
             .with_auth(setup_tests_with_mock_app_auth());
         let result = client
-            .send_request("GET", "/2/users/me", &[], None, Some("app"), None)
+            .send_request("GET", "/2/users/me", &[], None, Some("app"), None, false)
             .await;
 
         assert!(result.is_ok());
@@ -362,7 +362,7 @@ mod tests {
             .with_url(url)
             .with_auth(setup_tests_with_mock_oauth2_token());
         let result = client
-            .send_request("GET", "/2/users/me", &[], None, Some("oauth2"), None)
+            .send_request("GET", "/2/users/me", &[], None, Some("oauth2"), None, false)
             .await;
 
         assert!(matches!(result, Err(Error::ApiError(_))));
