@@ -44,7 +44,7 @@ impl ApiClient {
                 Ok(format!("Bearer {}", token))
             }
             None => {
-                if let Some(token) = auth.borrow().first_oauth2_token() {
+                if let Some(token) = auth.borrow_mut().get_token_store().get_first_oauth2_token() {
                     match token {
                         Token::OAuth2(token) => Ok(format!("Bearer {}", token)),
                         _ => Err(Error::AuthError(AuthError::WrongTokenFoundInStore)),
@@ -92,7 +92,7 @@ impl ApiClient {
                     if let Some(username) = username {
                         auth_ref.get_token_store().get_oauth2_token(username)
                     } else {
-                        auth_ref.first_oauth2_token()
+                        auth_ref.get_token_store().get_first_oauth2_token()
                     }
                 };
                 if let Some(token) = token {
@@ -225,9 +225,8 @@ mod tests {
     }
 
     fn mock_auth() -> Auth {
-        let config = Config::from_env().unwrap();
+        let config = Config::from_env();
         let auth = Auth::new(config)
-            .unwrap()
             .with_token_store(TokenStore::from_file_path(".xurl_test".into()));
         auth
     }
@@ -281,7 +280,7 @@ mod tests {
             .create_async()
             .await;
 
-        let config = Config::from_env().unwrap();
+        let config = Config::from_env();
         let client = ApiClient::new(config)
             .with_url(url)
             .with_auth(setup_tests_with_mock_oauth2_token());
@@ -307,7 +306,7 @@ mod tests {
             .create_async()
             .await;
 
-        let config = Config::from_env().unwrap();
+        let config = Config::from_env();
         let client = ApiClient::new(config)
             .with_url(url)
             .with_auth(setup_tests_with_mock_oauth1_token());
@@ -332,7 +331,7 @@ mod tests {
             .create_async()
             .await;
 
-        let config = Config::from_env().unwrap();
+        let config = Config::from_env();
         let client = ApiClient::new(config)
             .with_url(url)
             .with_auth(setup_tests_with_mock_app_auth());
@@ -357,7 +356,7 @@ mod tests {
             .create_async()
             .await;
 
-        let config = Config::from_env().unwrap();
+        let config = Config::from_env();
         let client = ApiClient::new(config.clone())
             .with_url(url)
             .with_auth(setup_tests_with_mock_oauth2_token());

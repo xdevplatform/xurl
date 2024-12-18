@@ -24,6 +24,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
+    #[error("Missing environment variable: {0}")]
+    MissingEnvVar(&'static str),
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
     #[error("Invalid code: {0}")]
@@ -47,32 +49,26 @@ pub enum AuthError {
 }
 
 pub struct Auth {
-    client: BasicClient,
     token_store: TokenStore,
     info_url: String,
+    client_id: String,
+    client_secret: String,
+    auth_url: String,
+    token_url: String,
+    redirect_uri: String,
 }
 
 impl Auth {
-    pub fn new(config: Config) -> Result<Self, AuthError> {
-        let client = BasicClient::new(
-            ClientId::new(config.client_id),
-            Some(ClientSecret::new(config.client_secret)),
-            AuthUrl::new(config.auth_url).map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
-            Some(
-                TokenUrl::new(config.token_url)
-                    .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
-            ),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(config.redirect_uri)
-                .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
-        );
-
-        Ok(Self {
-            client,
+    pub fn new(config: Config) -> Self {
+        Self {
             token_store: TokenStore::new(),
             info_url: config.info_url,
-        })
+            client_id: config.client_id,
+            client_secret: config.client_secret,
+            auth_url: config.auth_url,
+            token_url: config.token_url,
+            redirect_uri: config.redirect_uri,
+        }
     }
 
     #[allow(dead_code)]
@@ -151,10 +147,27 @@ impl Auth {
             }
         }
 
+        if self.client_id.is_empty() || self.client_secret.is_empty() {
+            return Err(AuthError::MissingEnvVar("CLIENT_ID or CLIENT_SECRET"));
+        }
+
+        let client = BasicClient::new(
+            ClientId::new(self.client_id.clone()),
+            Some(ClientSecret::new(self.client_secret.clone())),
+            AuthUrl::new(self.auth_url.clone()).map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
+            Some(
+                TokenUrl::new(self.token_url.clone())
+                    .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
+            ),
+        )
+        .set_redirect_uri(
+            RedirectUrl::new(self.redirect_uri.clone())
+                .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
+        );
+
         let (code_challenge, code_verifier) = PkceCodeChallenge::new_random_sha256();
 
-        let (auth_url, _csrf_token) = self
-            .client
+        let (auth_url, _csrf_token) = client
             .authorize_url(CsrfToken::new_random)
             .add_scope(Scope::new("block.read".to_string()))
             .add_scope(Scope::new("bookmark.read".to_string()))
@@ -189,8 +202,7 @@ impl Auth {
             .await
             .map_err(|e| AuthError::InvalidCode(e))?;
 
-        let token = self
-            .client
+        let token = client
             .exchange_code(AuthorizationCode::new(code))
             .set_pkce_verifier(code_verifier)
             .request_async(async_http_client)
@@ -235,11 +247,6 @@ impl Auth {
             })
     }
 
-    pub fn first_oauth2_token(&self) -> Option<Token> {
-        self.token_store.get_first_oauth2_token()
-    }
-
-    #[allow(dead_code)]
     pub fn get_token_store(&mut self) -> &mut TokenStore {
         &mut self.token_store
     }
