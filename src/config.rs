@@ -1,4 +1,3 @@
-use crate::error::Error;
 use std::env;
 
 #[derive(Clone)]
@@ -17,10 +16,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self, Error> {
-        let client_id = env::var("CLIENT_ID").map_err(|_| Error::MissingEnvVar("CLIENT_ID"))?;
-        let client_secret =
-            env::var("CLIENT_SECRET").map_err(|_| Error::MissingEnvVar("CLIENT_SECRET"))?;
+    pub fn from_env() -> Self {
+        let client_id = env::var("CLIENT_ID").unwrap_or_default();
+        let client_secret = env::var("CLIENT_SECRET").unwrap_or_default();
         let redirect_uri = env::var("REDIRECT_URI")
             .unwrap_or_else(|_| "http://localhost:8080/callback".to_string());
         let auth_url =
@@ -31,7 +29,7 @@ impl Config {
             env::var("API_BASE_URL").unwrap_or_else(|_| "https://api.x.com".to_string());
         let info_url =
             env::var("INFO_URL").unwrap_or_else(|_| format!("{}/2/users/me", api_base_url));
-        Ok(Self {
+        Self {
             client_id,
             client_secret,
             redirect_uri,
@@ -39,6 +37,6 @@ impl Config {
             token_url,
             api_base_url,
             info_url,
-        })
+        }
     }
 }

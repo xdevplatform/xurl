@@ -15,8 +15,8 @@ use error::Error;
 async fn main() -> Result<(), Error> {
     let cli = Cli::parse();
 
-    let config = Config::from_env()?;
-    let mut auth = Auth::new(config.clone())?;
+    let config = Config::from_env();
+    let mut auth = Auth::new(config.clone());
 
     // Handle auth subcommands
     if let Some(Commands::Auth { command }) = cli.command {

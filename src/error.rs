@@ -3,9 +3,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Missing environment variable: {0}")]
-    MissingEnvVar(&'static str),
-
     #[error("HTTP error: {0}")]
     HttpError(#[from] reqwest::Error),
 
