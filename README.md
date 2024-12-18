@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/xdevplatform/xurl/main/install.sh |
 
 ## Configuration
 
-Add the following to your environment variables:
+Add the following to your environment variables if you want to use OAuth 2.0:
 
 ```env
 export CLIENT_ID=your_client_id
