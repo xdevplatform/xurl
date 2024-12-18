@@ -247,7 +247,6 @@ impl Auth {
             })
     }
 
-    #[allow(dead_code)]
     pub fn get_token_store(&mut self) -> &mut TokenStore {
         &mut self.token_store
     }
