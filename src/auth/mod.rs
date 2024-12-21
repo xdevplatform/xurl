@@ -9,9 +9,11 @@ use crate::config::Config;
 
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::async_http_client;
+use oauth2::RefreshToken;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
-    Scope, TokenResponse, TokenUrl,
+    basic::BasicTokenType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    EmptyExtraTokenFields, PkceCodeChallenge, RedirectUrl, Scope, StandardTokenResponse,
+    TokenResponse, TokenUrl,
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -20,7 +22,7 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use rand::Rng;
 use sha1::Sha1;
 use std::collections::BTreeMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -136,7 +138,17 @@ impl Auth {
         if let Some(username) = username {
             if let Some(token) = self.token_store.get_oauth2_token(username) {
                 match token {
-                    Token::OAuth2(token) => return Ok(token),
+                    Token::OAuth2(token) => {
+                        if SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            > token.expiration_time
+                        {
+                            return self.oauth2_refresh_token(Some(username)).await;
+                        }
+                        return Ok(token.access_token);
+                    }
                     _ => return Err(AuthError::WrongTokenFoundInStore),
                 }
             } else {
@@ -151,47 +163,13 @@ impl Auth {
             return Err(AuthError::MissingEnvVar("CLIENT_ID or CLIENT_SECRET"));
         }
 
-        let client = BasicClient::new(
-            ClientId::new(self.client_id.clone()),
-            Some(ClientSecret::new(self.client_secret.clone())),
-            AuthUrl::new(self.auth_url.clone()).map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
-            Some(
-                TokenUrl::new(self.token_url.clone())
-                    .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
-            ),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(self.redirect_uri.clone())
-                .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
-        );
+        let client = self.create_oauth2_client().await?;
 
         let (code_challenge, code_verifier) = PkceCodeChallenge::new_random_sha256();
 
         let (auth_url, _csrf_token) = client
             .authorize_url(CsrfToken::new_random)
-            .add_scope(Scope::new("block.read".to_string()))
-            .add_scope(Scope::new("bookmark.read".to_string()))
-            .add_scope(Scope::new("dm.read".to_string()))
-            .add_scope(Scope::new("follows.read".to_string()))
-            .add_scope(Scope::new("like.read".to_string()))
-            .add_scope(Scope::new("list.read".to_string()))
-            .add_scope(Scope::new("mute.read".to_string()))
-            .add_scope(Scope::new("space.read".to_string()))
-            .add_scope(Scope::new("tweet.read".to_string()))
-            .add_scope(Scope::new("timeline.read".to_string()))
-            .add_scope(Scope::new("users.read".to_string()))
-            .add_scope(Scope::new("block.write".to_string()))
-            .add_scope(Scope::new("bookmark.write".to_string()))
-            .add_scope(Scope::new("dm.write".to_string()))
-            .add_scope(Scope::new("follows.write".to_string()))
-            .add_scope(Scope::new("like.write".to_string()))
-            .add_scope(Scope::new("list.write".to_string()))
-            .add_scope(Scope::new("mute.write".to_string()))
-            .add_scope(Scope::new("tweet.write".to_string()))
-            .add_scope(Scope::new("tweet.moderate.write".to_string()))
-            .add_scope(Scope::new("timeline.write".to_string()))
-            .add_scope(Scope::new("offline.access".to_string()))
-            .add_scope(Scope::new("media.write".to_string()))
+            .add_scopes(OAuth2Scopes::all())
             .set_pkce_challenge(code_challenge)
             .url();
 
@@ -215,26 +193,57 @@ impl Auth {
                 _ => AuthError::InvalidToken(e.to_string()),
             })?;
 
-        let token = token.access_token().secret().to_string();
+        let username = self
+            .fetch_username(&token.access_token().secret().to_string())
+            .await?;
+        self.save_token_data(&username, &token)?;
 
-        let username = reqwest::Client::new()
-            .get(&self.info_url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
+        Ok(token.access_token().secret().to_string())
+    }
+
+    pub async fn oauth2_refresh_token(
+        &mut self,
+        username: Option<&str>,
+    ) -> Result<String, AuthError> {
+        let refresh_token = if let Some(username) = username {
+            if let Some(token) = self.token_store.get_oauth2_token(username) {
+                match token {
+                    Token::OAuth2(token) => token.refresh_token,
+                    _ => return Err(AuthError::WrongTokenFoundInStore),
+                }
+            } else {
+                return Err(AuthError::TokenNotFound(format!(
+                    "No cached OAuth2 token found for {}",
+                    username
+                )));
+            }
+        } else {
+            let token = self.token_store.get_first_oauth2_token();
+            if let Some(token) = token {
+                match token {
+                    Token::OAuth2(token) => token.refresh_token,
+                    _ => return Err(AuthError::WrongTokenFoundInStore),
+                }
+            } else {
+                return Err(AuthError::TokenNotFound(
+                    "No OAuth2 tokens found".to_string(),
+                ));
+            }
+        };
+        let client = self.create_oauth2_client().await?;
+
+        let token = client
+            .exchange_refresh_token(&RefreshToken::new(refresh_token))
+            .request_async(async_http_client)
             .await
-            .map_err(|e| AuthError::NetworkError(e.to_string()))?
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|e| AuthError::NetworkError(e.to_string()))?;
+            .map_err(|e| AuthError::InvalidToken(e.to_string()))?;
 
-        let username = username["data"]["username"]
-            .as_str()
-            .ok_or_else(|| AuthError::NetworkError("Missing username field".to_string()))?
-            .to_string();
+        let username = self
+            .fetch_username(&token.access_token().secret().to_string())
+            .await?;
+        self.save_token_data(&username, &token)?;
 
-        self.token_store.save_oauth2_token(&username, &token)?;
-
-        Ok(token)
+        Ok(token.access_token().secret().to_string())
     }
 
     pub fn bearer_token(&self) -> Option<String> {
@@ -249,6 +258,117 @@ impl Auth {
 
     pub fn get_token_store(&mut self) -> &mut TokenStore {
         &mut self.token_store
+    }
+
+    async fn create_oauth2_client(&self) -> Result<BasicClient, AuthError> {
+        let client = BasicClient::new(
+            ClientId::new(self.client_id.clone()),
+            Some(ClientSecret::new(self.client_secret.clone())),
+            AuthUrl::new(self.auth_url.clone())
+                .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
+            Some(
+                TokenUrl::new(self.token_url.clone())
+                    .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
+            ),
+        )
+        .set_redirect_uri(
+            RedirectUrl::new(self.redirect_uri.clone())
+                .map_err(|e| AuthError::InvalidUrl(e.to_string()))?,
+        );
+
+        Ok(client)
+    }
+
+    async fn fetch_username(&self, access_token: &str) -> Result<String, AuthError> {
+        let response = reqwest::Client::new()
+            .get(&self.info_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send()
+            .await
+            .map_err(|e| AuthError::NetworkError(e.to_string()))?
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| AuthError::NetworkError(e.to_string()))?;
+
+        response["data"]["username"]
+            .as_str()
+            .ok_or_else(|| AuthError::NetworkError("Missing username field".to_string()))
+            .map(String::from)
+    }
+
+    fn save_token_data(
+        &mut self,
+        username: &str,
+        token: &StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
+    ) -> Result<(), TokenStoreError> {
+        let access_token = token.access_token().secret().to_string();
+        let refresh_token = token
+            .refresh_token()
+            .ok_or(TokenStoreError::RefreshTokenNotFound)?
+            .secret()
+            .to_string();
+
+        let expiration_time = token
+            .expires_in()
+            .unwrap_or(Duration::from_secs(7200))
+            .as_secs()
+            + SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+        self.token_store
+            .save_oauth2_token(username, &access_token, &refresh_token, expiration_time)
+    }
+}
+
+struct OAuth2Scopes {
+    read_scopes: Vec<&'static str>,
+    write_scopes: Vec<&'static str>,
+    other_scopes: Vec<&'static str>,
+}
+
+impl OAuth2Scopes {
+    fn all() -> Vec<Scope> {
+        let scopes = Self {
+            read_scopes: vec![
+                "block.read",
+                "bookmark.read",
+                "dm.read",
+                "follows.read",
+                "like.read",
+                "list.read",
+                "mute.read",
+                "space.read",
+                "tweet.read",
+                "timeline.read",
+                "users.read",
+            ],
+            write_scopes: vec![
+                "block.write",
+                "bookmark.write",
+                "dm.write",
+                "follows.write",
+                "like.write",
+                "list.write",
+                "mute.write",
+                "tweet.write",
+                "tweet.moderate.write",
+                "timeline.write",
+                "media.write",
+            ],
+            other_scopes: vec!["offline.access"],
+        };
+        scopes.to_oauth_scopes()
+    }
+
+    fn to_oauth_scopes(self) -> Vec<Scope> {
+        self.read_scopes
+            .into_iter()
+            .chain(self.write_scopes)
+            .chain(self.other_scopes)
+            .map(|s| Scope::new(s.to_string()))
+            .collect()
     }
 }
 
