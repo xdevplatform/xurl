@@ -110,25 +110,25 @@ async fn main() -> Result<(), Error> {
                 cli.username.as_deref(),
                 cli.verbose,
             )
-            .await {
-                Ok(res) => res,
-                Err(e) => match e {
-                    Error::ApiError(e) => {
-                        println!("{}", serde_json::to_string_pretty(&e)?);
-                        std::process::exit(1)
-                    },
-                    Error::HttpError(e) => {
-                        println!("{}", e);
-                        std::process::exit(1)
-                    },
-                    _ => {
-                        println!("{}", e);
-                        std::process::exit(1)
-                    }
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => match e {
+                Error::ApiError(e) => {
+                    println!("{}", serde_json::to_string_pretty(&e)?);
+                    std::process::exit(1)
                 }
-            };
+                Error::HttpError(e) => {
+                    println!("{}", e);
+                    std::process::exit(1)
+                }
+                _ => {
+                    println!("{}", e);
+                    std::process::exit(1)
+                }
+            },
+        };
 
-        
         // Pretty print the response
         println!("{}", serde_json::to_string_pretty(&response)?);
 

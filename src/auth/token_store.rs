@@ -12,11 +12,18 @@ pub struct OAuth1Token {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OAuth2Token {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+    pub(crate) expiration_time: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Token {
     #[serde(rename = "bearer")]
     Bearer(String), // Bearer token
     #[serde(rename = "oauth2")]
-    OAuth2(String), // access_token
+    OAuth2(OAuth2Token), // access_token
     #[serde(rename = "oauth1")]
     OAuth1(OAuth1Token),
 }
@@ -29,6 +36,8 @@ pub enum TokenStoreError {
     JSONDeserializationError,
     #[error("IO error")]
     IOError,
+    #[error("Refresh token not found")]
+    RefreshTokenNotFound,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,9 +87,17 @@ impl TokenStore {
         &mut self,
         username: &str,
         token: &str,
+        refresh_token: &str,
+        expiration_time: u64,
     ) -> Result<(), TokenStoreError> {
-        self.oauth2_tokens
-            .insert(username.to_string(), Token::OAuth2(token.to_string()));
+        self.oauth2_tokens.insert(
+            username.to_string(),
+            Token::OAuth2(OAuth2Token {
+                access_token: token.to_string(),
+                refresh_token: refresh_token.to_string(),
+                expiration_time,
+            }),
+        );
         self.save_to_file()
     }
 
