@@ -34,10 +34,25 @@ Optional environment variables:
 
 ### Authentication
 
+You must have a developer account and app to use this tool. 
+
+App authentication:
+```bash
+xurl auth app --bearer-token BEARER_TOKEN
+```
+
 OAuth 2.0 authentication:
 ```bash
 xurl auth oauth2
 ```
+
+**Note:** For OAuth 2.0 authentication, you must specify the redirect URI in the [X API developer portal](https://developer.x.com/en/portal/dashboard).
+
+1. Create an app at the [X API developer portal](https://developer.x.com/en/portal/dashboard).
+2. Go to authentication settings and set the redirect URI to `http://localhost:8080/callback`.
+![Setup](./assets/setup.png)
+![Redirect URI](./assets/callback.png)
+3. Set the client ID and secret in your environment variables.
 
 OAuth 1.0a authentication:
 ```bash
@@ -54,6 +69,7 @@ Clear authentication:
 xurl auth clear --all              # Clear all tokens
 xurl auth clear --oauth1           # Clear OAuth 1.0a tokens
 xurl auth clear --oauth2-username USERNAME  # Clear specific OAuth 2.0 token
+xurl auth clear --bearer           # Clear bearer token
 ```
 
 ### Making Requests
@@ -77,6 +93,7 @@ Specify authentication type:
 ```bash
 xurl --auth oauth2 /2/users/me
 xurl --auth oauth1 /2/tweets
+xurl --auth app /2/users/me
 ```
 
 Use specific OAuth 2.0 account:
@@ -88,16 +105,6 @@ xurl --username johndoe /2/users/me
 
 Tokens are stored securely in `~/.xurl` in your home directory.
 
-## Development
-
-The project uses the following structure:
-- `src/main.rs`: Entry point and command handling
-- `src/auth/`: Authentication implementation
-- `src/api/`: API client implementation
-- `src/cli/`: Command-line interface definitions
-- `src/config/`: Configuration management
-- `src/error/`: Error types and handling
-
 ## Testing
 
 Run the test suite:
@@ -107,12 +114,6 @@ cargo test
 
 ## Contributing
 Contributions are welcome!
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
 
 ## License
 This project is open-sourced under the MIT License - see the LICENSE file for details.

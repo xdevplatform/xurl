@@ -59,6 +59,14 @@ async fn main() -> Result<(), Error> {
                         "Not configured"
                     }
                 );
+                println!(
+                    "App Auth: {}",
+                    if store.has_bearer_token() {
+                        "Configured"
+                    } else {
+                        "Not configured"
+                    }
+                );
             }
 
             AuthCommands::Clear {

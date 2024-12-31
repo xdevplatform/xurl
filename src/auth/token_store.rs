@@ -163,6 +163,10 @@ impl TokenStore {
         self.oauth1_tokens.is_some()
     }
 
+    pub fn has_bearer_token(&self) -> bool {
+        self.bearer_token.is_some()
+    }
+
     fn save_to_file(&self) -> Result<(), TokenStoreError> {
         let content =
             serde_json::to_string(&self).map_err(|_| TokenStoreError::JSONSerializationError)?;
