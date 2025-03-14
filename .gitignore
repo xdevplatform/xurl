@@ -1,3 +1,4 @@
 xurl
 .xurl_test
-.DS_Store
+.DS_Store# Added by goreleaser init:
+dist/
