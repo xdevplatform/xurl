@@ -16,7 +16,18 @@ func CreateRootCommand(config *config.Config, auth *auth.Auth) *cobra.Command {
 	var rootCmd = &cobra.Command{
 		Use:   "xurl [flags] URL",
 		Short: "Auth enabled curl-like interface for the X API",
-		Long:  `A command-line tool for making authenticated requests to the X API.`,
+		Long:  `A command-line tool for making authenticated requests to the X API.
+
+Examples:
+  basic requests        xurl /2/users/me
+                        xurl -X POST /2/tweets -d '{"text":"Hello world!"}'
+                        xurl -H "Content-Type: application/json"/2/tweets
+  authentication        xurl --auth oauth2 /2/users/me
+                        xurl --auth oauth1 /2/users/me
+                        xurl --auth app /2/users/me
+  media and streaming   xurl media upload path/to/video.mp4
+                        xurl /2/tweets/search/stream --auth app
+                        xurl -s /2/users/me`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			return nil
 		},
