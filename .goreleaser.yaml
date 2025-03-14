@@ -22,6 +22,11 @@ builds:
       - linux
       - windows
       - darwin
+    ldflags:
+      - -s -w
+      - -X xurl/version.Version={{.Version}}
+      - -X xurl/version.Commit={{.Commit}}
+      - -X xurl/version.BuildDate={{.Date}}
 
 archives:
   - formats: [tar.gz]
