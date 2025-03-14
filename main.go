@@ -148,7 +148,7 @@ func createAuthOAuth2Cmd(auth *auth.Auth) *cobra.Command {
 		Use:   "oauth2",
 		Short: "Configure OAuth2 authentication",
 		Run: func(cmd *cobra.Command, args []string) {
-			_, err := auth.OAuth2("")
+			_, err := auth.OAuth2Flow("")
 			if err != nil {
 				fmt.Println("OAuth2 authentication failed:", err)
 				os.Exit(1)

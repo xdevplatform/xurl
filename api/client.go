@@ -14,7 +14,6 @@ import (
 	"xurl/auth"
 	"xurl/config"
 	xurlErrors "xurl/errors"
-	"xurl/store"
 )
 
 // ApiClient handles API requests
@@ -33,50 +32,6 @@ func NewApiClient(config *config.Config, auth *auth.Auth) *ApiClient {
 	}
 }
 
-// ValidateAndRefreshOAuth2Token validates and refreshes an OAuth2 token if needed
-func (c *ApiClient) ValidateAndRefreshOAuth2Token(token *store.Token, username string) (string, error) {
-	if token == nil || token.OAuth2 == nil {
-		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("oauth2 token not found"))
-	}
-
-	currentTime := time.Now().Unix()
-	if uint64(currentTime) > token.OAuth2.ExpirationTime {
-		if c.auth == nil {
-			return "", xurlErrors.NewAuthError("AuthNotSet", errors.New("auth not set"))
-		}
-		
-		newToken, err := c.auth.OAuth2RefreshToken(username)
-		if err != nil {
-			return "", err
-		}
-		
-		return newToken, nil
-	}
-	
-	return token.OAuth2.AccessToken, nil
-}
-
-// GetOAuth2Token gets an OAuth2 token
-func (c *ApiClient) GetOAuth2Token(username string) (string, error) {
-	if c.auth == nil {
-		return "", xurlErrors.NewAuthError("AuthNotSet", errors.New("auth not set"))
-	}
-	
-	var token *store.Token
-	
-	if username != "" {
-		token = c.auth.TokenStore.GetOAuth2Token(username)
-	} else {
-		token = c.auth.TokenStore.GetFirstOAuth2Token()
-	}
-	
-	if token == nil {
-		return c.auth.OAuth2(username)
-	}
-	
-	return c.ValidateAndRefreshOAuth2Token(token, username)
-}
-
 // GetAuthHeader gets the authorization header for a request
 func (c *ApiClient) GetAuthHeader(method, url string, authType string, username string) (string, error) {
 	if c.auth == nil {
@@ -87,15 +42,11 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 	if authType != "" {
 		switch strings.ToLower(authType) {
 		case "oauth1":
-			return c.auth.OAuth1(method, url, nil)
+			return c.auth.GetOAuth1Header(method, url, nil)
 		case "oauth2":
-			token, err := c.GetOAuth2Token(username)
-			if err != nil {
-				return "", err
-			}
-			return "Bearer " + token, nil
+			return c.auth.GetOAuth2Header(username)
 		case "app":
-			token := c.auth.BearerToken()
+			token := c.auth.GetBearerTokenHeader()
 			if token == "" {
 				return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("bearer token not found"))
 			}
@@ -108,7 +59,7 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 	// If no auth type is specified, try to use the first OAuth2 token
 	token := c.auth.TokenStore.GetFirstOAuth2Token()
 	if token != nil {
-		accessToken, err := c.ValidateAndRefreshOAuth2Token(token, username)
+		accessToken, err := c.auth.GetOAuth2Header(username)
 		if err == nil {
 			return "Bearer " + accessToken, nil
 		} else {
@@ -119,7 +70,7 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 	// If no OAuth2 token is available, try to use the first OAuth1 token
 	token = c.auth.TokenStore.GetOAuth1Tokens()
 	if token != nil {
-		authHeader, err := c.auth.OAuth1(method, url, nil)
+		authHeader, err := c.auth.GetOAuth1Header(method, url, nil)
 		if err == nil {
 			return authHeader, nil
 		} else {
@@ -128,7 +79,7 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 	}
 
 	// If no OAuth1 token is available, try to use the bearer token
-	bearerToken := c.auth.BearerToken()
+	bearerToken := c.auth.GetBearerTokenHeader()
 	if bearerToken != "" {
 		return "Bearer " + bearerToken, nil
 	} else {

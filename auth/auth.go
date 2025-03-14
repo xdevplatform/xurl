@@ -39,7 +39,7 @@ type Auth struct {
 	redirectURI   string
 }
 
-
+// NewAuth creates a new Auth object
 func NewAuth(config *config.Config) *Auth {
 	return &Auth{
 		TokenStore:    store.NewTokenStore(),
@@ -52,14 +52,14 @@ func NewAuth(config *config.Config) *Auth {
 	}
 }
 
-
+// WithTokenStore sets the token store for the Auth object
 func (a *Auth) WithTokenStore(tokenStore *store.TokenStore) *Auth {
 	a.TokenStore = tokenStore
 	return a
 }
 
-
-func (a *Auth) OAuth1(method, urlStr string, additionalParams map[string]string) (string, error) {
+// GetOAuth1Header gets the OAuth1 header for a request
+func (a *Auth) GetOAuth1Header(method, urlStr string, additionalParams map[string]string) (string, error) {
 	token := a.TokenStore.GetOAuth1Tokens()
 	if token == nil || token.OAuth1 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("OAuth1 token not found"))
@@ -112,8 +112,29 @@ func (a *Auth) OAuth1(method, urlStr string, additionalParams map[string]string)
 	return "OAuth " + strings.Join(oauthParams, ", "), nil
 }
 
+// GetOAuth2Token gets or refreshes an OAuth2 token
+func (a *Auth) GetOAuth2Header(username string) (string, error) {
+	var token *store.Token
+	
+	if username != "" {
+		token = a.TokenStore.GetOAuth2Token(username)
+	} else {
+		token = a.TokenStore.GetFirstOAuth2Token()
+	}
+	
+	if token == nil {
+		return a.OAuth2Flow(username)
+	}
+	
+	accessToken, err := a.RefreshOAuth2Token(username)
+	if err != nil {
+		return "", err
+	}
+	return "Bearer " + accessToken, nil
+}
 
-func (a *Auth) OAuth2(username string) (string, error) {
+// OAuth2Flow starts the OAuth2 flow
+func (a *Auth) OAuth2Flow(username string) (string, error) {
 	config := &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
@@ -211,7 +232,8 @@ func (a *Auth) OAuth2(username string) (string, error) {
 	return token.AccessToken, nil
 }
 
-func (a *Auth) OAuth2RefreshToken(username string) (string, error) {
+// RefreshOAuth2Token validates and refreshes an OAuth2 token if needed
+func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 	var token *store.Token
 	
 	if username != "" {
@@ -224,6 +246,11 @@ func (a *Auth) OAuth2RefreshToken(username string) (string, error) {
 	
 	if token == nil || token.OAuth2 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("oauth2 token not found"))
+	}
+	
+	currentTime := time.Now().Unix()
+	if uint64(currentTime) < token.OAuth2.ExpirationTime {
+		return token.OAuth2.AccessToken, nil
 	}
 		
 	config := &oauth2.Config{
@@ -264,12 +291,13 @@ func (a *Auth) OAuth2RefreshToken(username string) (string, error) {
 	return newToken.AccessToken, nil
 }
 
-func (a *Auth) BearerToken() string {
+// GetBearerTokenHeader gets the bearer token from the token store
+func (a *Auth) GetBearerTokenHeader() string {
 	token := a.TokenStore.GetBearerToken()
 	if token == nil {
 		return ""
 	}
-	return token.Bearer
+	return "Bearer " + token.Bearer
 }
 
 func (a *Auth) fetchUsername(accessToken string) (string, error) {
@@ -309,7 +337,6 @@ func (a *Auth) fetchUsername(accessToken string) (string, error) {
 }
 
 func generateSignature(method, urlStr string, params map[string]string, consumerSecret, tokenSecret string) (string, error) {
-	
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return "", xurlErrors.NewAuthError("InvalidURL", err)
@@ -419,4 +446,4 @@ func openBrowser(url string) error {
 	}
 
 	return exec.Command(cmd, args...).Start()
-} 
+}
