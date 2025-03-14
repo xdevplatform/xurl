@@ -95,13 +95,6 @@ xurl --username johndoe /2/users/me
 
 Tokens are stored securely in `~/.xurl` in your home directory.
 
-## Testing
-
-Run the test suite:
-```bash
-cargo test
-```
-
 ## Contributing
 Contributions are welcome!
 
