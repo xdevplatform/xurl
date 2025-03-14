@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -142,7 +144,20 @@ func TestBuildRequest(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := client.BuildRequest(tt.method, tt.endpoint, tt.headers, tt.data, tt.authType, tt.username)
+			var body io.Reader
+			contentType := ""
+			if tt.data != "" && (strings.ToUpper(tt.method) == "POST" || strings.ToUpper(tt.method) == "PUT" || strings.ToUpper(tt.method) == "PATCH") {
+				body = bytes.NewBufferString(tt.data)
+				
+				var js json.RawMessage
+				if json.Unmarshal([]byte(tt.data), &js) == nil {
+					contentType = "application/json"
+				} else {
+					contentType = "application/x-www-form-urlencoded"
+				}
+			}
+			
+			req, err := client.BuildRequest(tt.method, tt.endpoint, tt.headers, body, contentType, tt.authType, tt.username)
 			
 			if (err != nil) != tt.wantErr {
 				t.Errorf("BuildRequest() error = %v, wantErr %v", err, tt.wantErr)

@@ -99,8 +99,7 @@ func (m *MediaUploader) Init(mediaType string, mediaCategory string) error {
 	m.mediaID = initResponse.Data.ID
 
 	if m.verbose {
-		rawJSON, _ := json.MarshalIndent(initResponse, "", "  ")
-		utils.ColorizeAndPrintJSON(string(rawJSON))
+		utils.FormatAndPrintResponse(initResponse)
 	}
 
 	return nil
@@ -200,8 +199,7 @@ func (m *MediaUploader) Finalize() (json.RawMessage, error) {
 	}
 
 	if m.verbose {
-		prettyJSON, _ := json.MarshalIndent(response, "", "  ")
-		utils.ColorizeAndPrintJSON(string(prettyJSON))
+		utils.FormatAndPrintResponse(response)
 	}
 
 	return response, nil
@@ -225,8 +223,7 @@ func (m *MediaUploader) CheckStatus() (json.RawMessage, error) {
 	}
 
 	if m.verbose {
-		prettyJSON, _ := json.MarshalIndent(response, "", "  ")
-		utils.ColorizeAndPrintJSON(string(prettyJSON))
+		utils.FormatAndPrintResponse(response)
 	}
 
 	return response, nil
@@ -317,11 +314,7 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 		return fmt.Errorf("error finalizing upload: %v", err)
 	}
 	
-	prettyJSON, err := json.MarshalIndent(finalizeResponse, "", "  ")
-	if err != nil {
-		return fmt.Errorf("error formatting JSON: %v", err)
-	}
-	utils.ColorizeAndPrintJSON(string(prettyJSON))
+	utils.FormatAndPrintResponse(finalizeResponse)
 	
 	// Wait for processing if requested
 	if waitForProcessing {
@@ -330,13 +323,8 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 		if err != nil {
 			return fmt.Errorf("error during media processing: %v", err)
 		}
-		
-		// Pretty print the processing response
-		prettyJSON, err := json.MarshalIndent(processingResponse, "", "  ")
-		if err != nil {
-			return fmt.Errorf("error formatting JSON: %v", err)
-		}
-		utils.ColorizeAndPrintJSON(string(prettyJSON))
+
+		utils.FormatAndPrintResponse(processingResponse)
 	}
 	
 	fmt.Printf("\033[32mMedia uploaded successfully! Media ID: %s\033[0m\n", uploader.GetMediaID())

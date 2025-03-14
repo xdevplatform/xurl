@@ -56,10 +56,10 @@ xurl auth status
 
 Clear authentication:
 ```bash
-xurl auth clear --all              # Clear all tokens
-xurl auth clear --oauth1           # Clear OAuth 1.0a tokens
+xurl auth clear --all                       # Clear all tokens
+xurl auth clear --oauth1                    # Clear OAuth 1.0a tokens
 xurl auth clear --oauth2-username USERNAME  # Clear specific OAuth 2.0 token
-xurl auth clear --bearer           # Clear bearer token
+xurl auth clear --bearer                    # Clear bearer token
 ```
 
 ### Making Requests
@@ -89,18 +89,6 @@ xurl --auth app /2/users/me
 Use specific OAuth 2.0 account:
 ```bash
 xurl --username johndoe /2/users/me
-```
-
-### File Uploads
-
-Upload a file using multipart form data:
-```bash
-xurl -F path/to/file.jpg /2/media/upload?command=APPEND&media_id=123456789
-```
-
-You can also specify the media_id in the request body:
-```bash
-xurl -X POST -F path/to/file.jpg -d "command=APPEND&media_id=123456789" /2/media/upload
 ```
 
 ### Streaming Responses
@@ -155,22 +143,22 @@ You can also use the main command with the `-F` flag for direct media uploads:
 
 1. First, initialize the upload:
 ```bash
-xurl -X POST -d "command=INIT&total_bytes=FILE_SIZE&media_type=video/mp4" /2/media/upload
+xurl -X POST '/2/media/upload?command=INIT&total_bytes=FILE_SIZE&media_type=video/mp4&media_catefory=tweet_video'
 ```
 
 2. Then, append the media chunks:
 ```bash
-xurl -X POST -F path/to/file.mp4 /2/media/upload?command=APPEND&media_id=MEDIA_ID&segment_index=0
+xurl -X POST -F path/to/file.mp4 '/2/media/upload?command=APPEND&media_id=MEDIA_ID&segment_index=0'
 ```
 
 3. Finally, finalize the upload:
 ```bash
-xurl -X POST -d "command=FINALIZE&media_id=MEDIA_ID" /2/media/upload
+xurl -X POST '/2/media/upload?command=FINALIZE&media_id=MEDIA_ID'
 ```
 
 4. Check the status:
 ```bash
-xurl /2/media/upload?command=STATUS&media_id=MEDIA_ID
+xurl '/2/media/upload?command=STATUS&media_id=MEDIA_ID'
 ```
 
 ## Token Storage

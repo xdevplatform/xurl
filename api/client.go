@@ -41,7 +41,6 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 		return "", xurlErrors.NewAuthError("AuthNotSet", errors.New("auth not set"))
 	}
 	
-	// If auth type is specified, use it
 	if authType != "" {
 		switch strings.ToLower(authType) {
 		case "oauth1":
@@ -84,7 +83,7 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 }
 
 // BuildRequest builds an HTTP request
-func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, data string, authType string, username string) (*http.Request, error) {
+func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, body io.Reader, contentType string, authType string, username string) (*http.Request, error) {
 	httpMethod := strings.ToUpper(method)
 	
 	url := endpoint
@@ -100,20 +99,11 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, data
 		}
 	}
 	
-	var req *http.Request
-	var err error
-	
-	if data != "" && (httpMethod == "POST" || httpMethod == "PUT" || httpMethod == "PATCH") {
-		req, err = http.NewRequest(httpMethod, url, bytes.NewBufferString(data))
-	} else {
-		req, err = http.NewRequest(httpMethod, url, nil)
-	}
-	
+	req, err := http.NewRequest(httpMethod, url, body)
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
 	}
 	
-	// Add headers
 	for _, header := range headers {
 		parts := strings.SplitN(header, ":", 2)
 		if len(parts) == 2 {
@@ -121,18 +111,10 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, data
 		}
 	}
 	
-	// Add content-type header if not present and we have data
-	if data != "" && req.Header.Get("Content-Type") == "" {
-		// Try to parse as JSON
-		var js json.RawMessage
-		if json.Unmarshal([]byte(data), &js) == nil {
-			req.Header.Add("Content-Type", "application/json")
-		} else {
-			req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-		}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	
-	// Add authorization header if not present
 	if req.Header.Get("Authorization") == "" {
 		authHeader, err := c.GetAuthHeader(httpMethod, url, authType, username)
 		if err == nil {
@@ -143,37 +125,13 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, data
 	return req, nil
 }
 
-// SendRequest sends an HTTP request
-func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
-	req, err := c.BuildRequest(method, endpoint, headers, data, authType, username)
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
-	
-	if verbose {
-		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
-		for key, values := range req.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-	
-	// Send request
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
-	defer resp.Body.Close()
-	
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+// processResponse handles common response processing logic
+func (c *ApiClient) processResponse(resp *http.Response, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, xurlErrors.NewIOError(err)
 	}
 	
-	// Print verbose information
 	if verbose {
 		fmt.Printf("\033[1;31m< %s\033[0m\n", resp.Status)
 		for key, values := range resp.Header {
@@ -184,13 +142,18 @@ func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data 
 		fmt.Println()
 	}
 	
-	// Check if response is JSON
 	var js json.RawMessage
-	if err := json.Unmarshal(body, &js); err != nil {
-		return nil, xurlErrors.NewJSONError(err)
+	if len(responseBody) > 0 {
+		if err := json.Unmarshal(responseBody, &js); err != nil {
+			if resp.StatusCode >= 400 {
+				return nil, xurlErrors.NewHTTPError(fmt.Errorf("HTTP error: %s", resp.Status))
+			}
+			js = json.RawMessage("{}")
+		}
+	} else {
+		js = json.RawMessage("{}")
 	}
 	
-	// Check if response is an error
 	if resp.StatusCode >= 400 {
 		return nil, xurlErrors.NewAPIError(js)
 	}
@@ -198,20 +161,78 @@ func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data 
 	return js, nil
 }
 
-// SendMultipartRequest sends an HTTP request with multipart form data
-func (c *ApiClient) SendMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, fileField, filePath string, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
-	// Create a new multipart writer
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+// logRequest logs request details if verbose mode is enabled
+func (c *ApiClient) logRequest(req *http.Request, verbose bool) {
+	if verbose {
+		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
+		for key, values := range req.Header {
+			for _, value := range values {
+				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
+			}
+		}
+		fmt.Println()
+	}
+}
+
+// SendRequest sends an HTTP request
+func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+	var body io.Reader
+	contentType := ""
 	
-	// Add form fields
+	if data != "" && (strings.ToUpper(method) == "POST" || strings.ToUpper(method) == "PUT" || strings.ToUpper(method) == "PATCH") {
+		body = bytes.NewBufferString(data)
+
+		var js json.RawMessage
+		if json.Unmarshal([]byte(data), &js) == nil {
+			contentType = "application/json"
+		} else {
+			contentType = "application/x-www-form-urlencoded"
+		}
+	}
+	
+	req, err := c.BuildRequest(method, endpoint, headers, body, contentType, authType, username)
+	if err != nil {
+		return nil, xurlErrors.NewHTTPError(err)
+	}
+	
+	c.logRequest(req, verbose)
+	
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, xurlErrors.NewHTTPError(err)
+	}
+	defer resp.Body.Close()
+	
+	return c.processResponse(resp, verbose)
+}
+
+// prepareMultipartRequest prepares a multipart request with common setup
+func (c *ApiClient) prepareMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, 
+	writer *multipart.Writer, body *bytes.Buffer, authType string, username string) (*http.Request, *xurlErrors.Error) {
+	
 	for key, value := range formFields {
 		if err := writer.WriteField(key, value); err != nil {
 			return nil, xurlErrors.NewIOError(fmt.Errorf("error writing form field: %v", err))
 		}
 	}
 	
-	// Add file if provided
+	if err := writer.Close(); err != nil {
+		return nil, xurlErrors.NewIOError(fmt.Errorf("error closing multipart writer: %v", err))
+	}
+	
+	req, err := c.BuildRequest(method, endpoint, headers, body, writer.FormDataContentType(), authType, username)
+	if err != nil {
+		return nil, xurlErrors.NewHTTPError(err)
+	}
+	
+	return req, nil
+}
+
+// SendMultipartRequest sends an HTTP request with multipart form data
+func (c *ApiClient) SendMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, fileField, filePath string, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	
 	if fileField != "" && filePath != "" {
 		file, err := os.Open(filePath)
 		if err != nil {
@@ -219,226 +240,81 @@ func (c *ApiClient) SendMultipartRequest(method, endpoint string, headers []stri
 		}
 		defer file.Close()
 		
-		// Create form file
 		part, err := writer.CreateFormFile(fileField, filepath.Base(filePath))
 		if err != nil {
 			return nil, xurlErrors.NewIOError(fmt.Errorf("error creating form file: %v", err))
 		}
 		
-		// Copy file content to form file
 		if _, err := io.Copy(part, file); err != nil {
 			return nil, xurlErrors.NewIOError(fmt.Errorf("error copying file content: %v", err))
 		}
 	}
 	
-	// Close the writer
-	if err := writer.Close(); err != nil {
-		return nil, xurlErrors.NewIOError(fmt.Errorf("error closing multipart writer: %v", err))
+	req, xerr := c.prepareMultipartRequest(method, endpoint, headers, formFields, writer, body, authType, username)
+	if xerr != nil {
+		return nil, xerr
 	}
 	
-	// Create request
-	req, err := http.NewRequest(method, endpoint, body)
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
+	c.logRequest(req, verbose)
 	
-	// Add content type header for multipart form data
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	
-	// Add other headers
-	for _, header := range headers {
-		parts := strings.SplitN(header, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Add(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-		}
-	}
-	
-	// Add authorization header if not present
-	if req.Header.Get("Authorization") == "" {
-		authHeader, err := c.GetAuthHeader(method, endpoint, authType, username)
-		if err == nil {
-			req.Header.Add("Authorization", authHeader)
-		}
-	}
-	
-	// Print verbose information
-	if verbose {
-		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
-		for key, values := range req.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-	
-	// Send request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
 	}
 	defer resp.Body.Close()
 	
-	// Read response body
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, xurlErrors.NewIOError(err)
-	}
-	
-	// Print verbose information
-	if verbose {
-		fmt.Printf("\033[1;31m< %s\033[0m\n", resp.Status)
-		for key, values := range resp.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;32m< %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-	
-	// Check if response is JSON
-	var js json.RawMessage
-	if len(responseBody) > 0 {
-		if err := json.Unmarshal(responseBody, &js); err != nil {
-			// If the response is not JSON, return an error
-			if resp.StatusCode >= 400 {
-				return nil, xurlErrors.NewHTTPError(fmt.Errorf("HTTP error: %s", resp.Status))
-			}
-			// For successful responses that are not JSON, return an empty JSON object
-			js = json.RawMessage("{}")
-		}
-	} else {
-		// Empty response, return an empty JSON object
-		js = json.RawMessage("{}")
-	}
-	
-	// Check if response is an error
-	if resp.StatusCode >= 400 {
-		return nil, xurlErrors.NewAPIError(js)
-	}
-	
-	return js, nil
+	return c.processResponse(resp, verbose)
 }
 
 // SendMultipartRequestWithBuffer sends an HTTP request with multipart form data using a buffer for file data
 func (c *ApiClient) SendMultipartRequestWithBuffer(method, endpoint string, headers []string, formFields map[string]string, fileField, fileName string, fileData []byte, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
-	// Create a new multipart writer
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	
-	// Add form fields
-	for key, value := range formFields {
-		if err := writer.WriteField(key, value); err != nil {
-			return nil, xurlErrors.NewIOError(fmt.Errorf("error writing form field: %v", err))
-		}
-	}
-	
-	// Add file data if provided
 	if fileField != "" && len(fileData) > 0 {
-		// Create form file
 		part, err := writer.CreateFormFile(fileField, fileName)
 		if err != nil {
 			return nil, xurlErrors.NewIOError(fmt.Errorf("error creating form file: %v", err))
 		}
 		
-		// Write file data to form file
 		if _, err := part.Write(fileData); err != nil {
 			return nil, xurlErrors.NewIOError(fmt.Errorf("error writing file data: %v", err))
 		}
 	}
 	
-	// Close the writer
-	if err := writer.Close(); err != nil {
-		return nil, xurlErrors.NewIOError(fmt.Errorf("error closing multipart writer: %v", err))
+	req, xerr := c.prepareMultipartRequest(method, endpoint, headers, formFields, writer, body, authType, username)
+	if xerr != nil {
+		return nil, xerr
 	}
 	
-	// Create request
-	req, err := http.NewRequest(method, endpoint, body)
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
+	c.logRequest(req, verbose)
 	
-	// Add content type header for multipart form data
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	
-	// Add other headers
-	for _, header := range headers {
-		parts := strings.SplitN(header, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Add(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-		}
-	}
-	
-	// Add authorization header if not present
-	if req.Header.Get("Authorization") == "" {
-		authHeader, err := c.GetAuthHeader(method, endpoint, authType, username)
-		if err == nil {
-			req.Header.Add("Authorization", authHeader)
-		}
-	}
-	
-	// Print verbose information
-	if verbose {
-		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
-		for key, values := range req.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-	
-	// Send request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
 	}
 	defer resp.Body.Close()
 	
-	// Read response body
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, xurlErrors.NewIOError(err)
-	}
-	
-	// Print verbose information
-	if verbose {
-		fmt.Printf("\033[1;31m< %s\033[0m\n", resp.Status)
-		for key, values := range resp.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;32m< %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-	
-	// Check if response is JSON
-	var js json.RawMessage
-	if len(responseBody) > 0 {
-		if err := json.Unmarshal(responseBody, &js); err != nil {
-			// If the response is not JSON, return an error
-			if resp.StatusCode >= 400 {
-				return nil, xurlErrors.NewHTTPError(fmt.Errorf("HTTP error: %s", resp.Status))
-			}
-			// For successful responses that are not JSON, return an empty JSON object
-			js = json.RawMessage("{}")
-		}
-	} else {
-		// Empty response, return an empty JSON object
-		js = json.RawMessage("{}")
-	}
-	
-	// Check if response is an error
-	if resp.StatusCode >= 400 {
-		return nil, xurlErrors.NewAPIError(js)
-	}
-	
-	return js, nil
+	return c.processResponse(resp, verbose)
 }
 
 // StreamRequest sends an HTTP request and streams the response
 func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) *xurlErrors.Error {
-	req, err := c.BuildRequest(method, endpoint, headers, data, authType, username)
+	var body io.Reader
+	contentType := ""
+	
+	if data != "" && (strings.ToUpper(method) == "POST" || strings.ToUpper(method) == "PUT" || strings.ToUpper(method) == "PATCH") {
+		body = bytes.NewBufferString(data)
+		
+		var js json.RawMessage
+		if json.Unmarshal([]byte(data), &js) == nil {
+			contentType = "application/json"
+		} else {
+			contentType = "application/x-www-form-urlencoded"
+		}
+	}
+	
+	req, err := c.BuildRequest(method, endpoint, headers, body, contentType, authType, username)
 	if err != nil {
 		return xurlErrors.NewHTTPError(err)
 	}
@@ -481,7 +357,6 @@ func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, dat
 			return xurlErrors.NewIOError(err)
 		}
 		
-		// Check if response is JSON
 		var js json.RawMessage
 		if err := json.Unmarshal(body, &js); err != nil {
 			return xurlErrors.NewJSONError(err)
@@ -490,14 +365,14 @@ func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, dat
 		return xurlErrors.NewAPIError(js)
 	}
 	
-	contentType := resp.Header.Get("Content-Type")
+	contentType = resp.Header.Get("Content-Type")
 	isJSON := strings.Contains(contentType, "application/json") || 
 		strings.Contains(contentType, "application/x-ndjson") ||
 		strings.Contains(contentType, "application/stream+json")
 	
 	scanner := bufio.NewScanner(resp.Body)
 	
-	const maxScanTokenSize = 1024 * 1024 // 1MB
+	const maxScanTokenSize = 1024 * 1024
 	buf := make([]byte, maxScanTokenSize)
 	scanner.Buffer(buf, maxScanTokenSize)
 	
