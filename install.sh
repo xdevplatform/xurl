@@ -28,7 +28,10 @@ detect_architecture() {
             echo "x86_64"
             ;;
         aarch64|arm64)
-            echo "aarch64"
+            echo "arm64"
+            ;;
+        i386|i686)
+            echo "i386"
             ;;
         *)
             print_error "Unsupported architecture: $arch"
@@ -40,10 +43,10 @@ detect_os() {
     local os=$(uname -s)
     case $os in
         Linux)
-            echo "unknown-linux-gnu"
+            echo "Linux"
             ;;
         Darwin)
-            echo "apple-darwin"
+            echo "Darwin"
             ;;
         *)
             print_error "Unsupported operating system: $os"
@@ -54,19 +57,8 @@ detect_os() {
 download_release() {
     local os=$1
     local arch=$2
-    local binary_name="${PROGRAM_NAME}-${arch}-${os}.tar.gz"
+    local binary_name="${PROGRAM_NAME}_${os}_${arch}.tar.gz"
     
-    # Handle universal binary for macOS
-    if [ "$os" = "apple-darwin" ] && [ "$arch" = "x86_64" ]; then
-        # Try universal binary first
-        binary_name="${PROGRAM_NAME}-universal-${os}.tar.gz"
-        local download_url="https://github.com/${GITHUB_REPO}/releases/latest/download/${binary_name}"
-        if ! curl --output /dev/null --silent --head --fail "$download_url"; then
-            # Fall back to architecture-specific binary if universal not found
-            binary_name="${PROGRAM_NAME}-${arch}-${os}.tar.gz"
-        fi
-    fi
-
     local download_url="https://github.com/${GITHUB_REPO}/releases/latest/download/${binary_name}"
     print_message "Downloading latest release: ${binary_name}..."
     local temp_dir=$(mktemp -d)
