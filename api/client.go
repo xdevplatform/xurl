@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"bufio"
 	"xurl/auth"
 	"xurl/config"
 	xurlErrors "xurl/errors"
@@ -93,7 +94,7 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 				return "", err
 			}
 			return "Bearer " + token, nil
-		case "bearer":
+		case "app":
 			token := c.auth.BearerToken()
 			if token == "" {
 				return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("bearer token not found"))
@@ -251,4 +252,107 @@ func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data 
 	}
 	
 	return js, nil
+}
+
+// StreamRequest sends an HTTP request and streams the response
+func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) *xurlErrors.Error {
+	req, err := c.BuildRequest(method, endpoint, headers, data, authType, username)
+	if err != nil {
+		return xurlErrors.NewHTTPError(err)
+	}
+	
+	if verbose {
+		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
+		for key, values := range req.Header {
+			for _, value := range values {
+				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
+			}
+		}
+		fmt.Println()
+	}
+	
+	client := &http.Client{
+		Timeout: 0,
+	}
+	
+	fmt.Printf("\033[1;32mConnecting to streaming endpoint: %s\033[0m\n", endpoint)
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		return xurlErrors.NewHTTPError(err)
+	}
+	defer resp.Body.Close()
+	
+	if verbose {
+		fmt.Printf("\033[1;31m< %s\033[0m\n", resp.Status)
+		for key, values := range resp.Header {
+			for _, value := range values {
+				fmt.Printf("\033[1;32m< %s\033[0m: %s\n", key, value)
+			}
+		}
+		fmt.Println()
+	}
+	
+	if resp.StatusCode >= 400 {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return xurlErrors.NewIOError(err)
+		}
+		
+		// Check if response is JSON
+		var js json.RawMessage
+		if err := json.Unmarshal(body, &js); err != nil {
+			return xurlErrors.NewJSONError(err)
+		}
+		
+		return xurlErrors.NewAPIError(js)
+	}
+	
+	contentType := resp.Header.Get("Content-Type")
+	isJSON := strings.Contains(contentType, "application/json") || 
+		strings.Contains(contentType, "application/x-ndjson") ||
+		strings.Contains(contentType, "application/stream+json")
+	
+	scanner := bufio.NewScanner(resp.Body)
+	
+	const maxScanTokenSize = 1024 * 1024 // 1MB
+	buf := make([]byte, maxScanTokenSize)
+	scanner.Buffer(buf, maxScanTokenSize)
+	
+	fmt.Println("\033[1;32m--- Streaming response started ---\033[0m")
+	fmt.Println("\033[1;32m--- Press Ctrl+C to stop ---\033[0m")
+	
+	for scanner.Scan() {
+		line := scanner.Text()
+		
+		if line == "" {
+			continue
+		}
+		
+		if isJSON {
+			var js json.RawMessage
+			if err := json.Unmarshal([]byte(line), &js); err != nil {
+				fmt.Println(line)
+			} else {
+				prettyJSON, err := json.MarshalIndent(js, "", "  ")
+				if err != nil {
+					fmt.Println(line)
+				} else {
+					fmt.Println(string(prettyJSON))
+				}
+			}
+		} else {
+			fmt.Println(line)
+		}
+	}
+	
+	if err := scanner.Err(); err != nil {
+		if err == bufio.ErrTooLong {
+			return xurlErrors.NewIOError(fmt.Errorf("line too long: increase buffer size"))
+		}
+		return xurlErrors.NewIOError(err)
+	}
+	
+	fmt.Println("\033[1;32m--- End of stream ---\033[0m")
+	return nil
 } 

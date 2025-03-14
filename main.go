@@ -37,6 +37,7 @@ func main() {
 			authType, _ := cmd.Flags().GetString("auth")
 			username, _ := cmd.Flags().GetString("username")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			forceStream, _ := cmd.Flags().GetBool("stream")
 
 			// Check if URL is provided
 			if len(args) == 0 {
@@ -51,23 +52,38 @@ func main() {
 			// Create API client
 			client := api.NewApiClient(config, auth)
 
-			// Make the request
-			response, clientErr := client.SendRequest(method, url, headers, data, authType, username, verbose)
-			if clientErr != nil {
-				var rawJSON json.RawMessage
-				json.Unmarshal([]byte(clientErr.Message), &rawJSON)
-				prettyJSON, _ := json.MarshalIndent(rawJSON, "", "  ")
-				fmt.Println(string(prettyJSON))
-				os.Exit(1)
-			}
+			// Check if the endpoint should be streamed
+			shouldStream := forceStream || api.IsStreamingEndpoint(url)
 
-			// Pretty print the response
-			prettyJSON, err := json.MarshalIndent(response, "", "  ")
-			if err != nil {
-				fmt.Println("Error formatting JSON:", err)
-				os.Exit(1)
+			if shouldStream {
+				// Make streaming request
+				clientErr := client.StreamRequest(method, url, headers, data, authType, username, verbose)
+				if clientErr != nil {
+					var rawJSON json.RawMessage
+					json.Unmarshal([]byte(clientErr.Message), &rawJSON)
+					prettyJSON, _ := json.MarshalIndent(rawJSON, "", "  ")
+					fmt.Println(string(prettyJSON))
+					os.Exit(1)
+				}
+			} else {
+				// Make regular request
+				response, clientErr := client.SendRequest(method, url, headers, data, authType, username, verbose)
+				if clientErr != nil {
+					var rawJSON json.RawMessage
+					json.Unmarshal([]byte(clientErr.Message), &rawJSON)
+					prettyJSON, _ := json.MarshalIndent(rawJSON, "", "  ")
+					fmt.Println(string(prettyJSON))
+					os.Exit(1)
+				}
+
+				// Pretty print the response
+				prettyJSON, err := json.MarshalIndent(response, "", "  ")
+				if err != nil {
+					fmt.Println("Error formatting JSON:", err)
+					os.Exit(1)
+				}
+				fmt.Println(string(prettyJSON))
 			}
-			fmt.Println(string(prettyJSON))
 		},
 	}
 
@@ -78,6 +94,7 @@ func main() {
 	rootCmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
 	rootCmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	rootCmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
+	rootCmd.Flags().BoolP("stream", "s", false, "Force streaming mode for non-streaming endpoints")
 
 	// Create auth command
 	var authCmd = &cobra.Command{

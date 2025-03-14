@@ -91,6 +91,28 @@ Use specific OAuth 2.0 account:
 xurl --username johndoe /2/users/me
 ```
 
+### Streaming Responses
+
+Streaming endpoints (like `/2/tweets/search/stream`) are automatically detected and handled appropriately. The tool will automatically stream the response for these endpoints:
+
+- `/2/tweets/search/stream`
+- `/2/tweets/sample/stream`
+- `/2/tweets/sample10/stream`
+- `/2/tweets/firehose/strea/lang/en`
+- `/2/tweets/firehose/stream/lang/ja`
+- `/2/tweets/firehose/stream/lang/ko`
+- `/2/tweets/firehose/stream/lang/pt`
+
+For example:
+```bash
+xurl /2/tweets/search/stream
+```
+
+You can also force streaming mode for any endpoint using the `--stream` or `-s` flag:
+```bash
+xurl -s /2/users/me
+```
+
 ## Token Storage
 
 Tokens are stored securely in `~/.xurl` in your home directory.
