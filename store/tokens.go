@@ -79,7 +79,7 @@ func NewTokenStore() *TokenStore {
 	}
 
 	// Either .xurl doesn't exist or we don't have OAuth1 tokens
-	if store.OAuth1Token == nil {
+	if store.OAuth1Token == nil || store.BearerToken == nil {
 		twurlPath := filepath.Join(homeDir, ".twurlrc")
 		if _, err := os.Stat(twurlPath); err == nil {
 			if err := store.importFromTwurlrc(twurlPath); err != nil {
@@ -109,13 +109,14 @@ func (s *TokenStore) importFromTwurlrc(filePath string) error {
 		Configuration struct {
 			DefaultProfile []string `yaml:"default_profile"`
 		} `yaml:"configuration"`
+		BearerTokens map[string]string `yaml:"bearer_tokens"`
 	}
 
 	if err := yaml.Unmarshal(data, &twurlConfig); err != nil {
 		return errors.NewJSONError(err)
 	}
 
-	// Import OAuth1 tokens from twurlrc
+	// Import the first OAuth1 tokens from twurlrc
 	for _, consumerKeys := range twurlConfig.Profiles {
 		for consumerKey, profile := range consumerKeys {
 			if s.OAuth1Token == nil {
@@ -133,6 +134,17 @@ func (s *TokenStore) importFromTwurlrc(filePath string) error {
 			break
 		}
 		break
+	}
+
+	// Import the first bearer token from twurlrc
+	if len(twurlConfig.BearerTokens) > 0 {
+		for _, bearerToken := range twurlConfig.BearerTokens {
+			s.BearerToken = &Token{
+				Type:   BearerTokenType,
+				Bearer: bearerToken,
+			}
+			break
+		}
 	}
 
 	return s.saveToFile()
