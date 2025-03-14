@@ -91,6 +91,18 @@ Use specific OAuth 2.0 account:
 xurl --username johndoe /2/users/me
 ```
 
+### File Uploads
+
+Upload a file using multipart form data:
+```bash
+xurl -F path/to/file.jpg /2/media/upload?command=APPEND&media_id=123456789
+```
+
+You can also specify the media_id in the request body:
+```bash
+xurl -X POST -F path/to/file.jpg -d "command=APPEND&media_id=123456789" /2/media/upload
+```
+
 ### Streaming Responses
 
 Streaming endpoints (like `/2/tweets/search/stream`) are automatically detected and handled appropriately. The tool will automatically stream the response for these endpoints:
@@ -111,6 +123,54 @@ xurl /2/tweets/search/stream
 You can also force streaming mode for any endpoint using the `--stream` or `-s` flag:
 ```bash
 xurl -s /2/users/me
+```
+
+### Media Upload
+
+The tool supports uploading media files to the X API using the chunked upload process.
+
+Upload a media file:
+```bash
+xurl media upload path/to/file.mp4
+```
+
+With custom media type and category:
+```bash
+xurl media upload --media-type image/jpeg --category tweet_image path/to/image.jpg
+```
+
+Check media upload status:
+```bash
+xurl media status MEDIA_ID
+```
+
+Wait for media processing to complete:
+```bash
+xurl media status --wait MEDIA_ID
+```
+
+#### Direct Media Upload
+
+You can also use the main command with the `-F` flag for direct media uploads:
+
+1. First, initialize the upload:
+```bash
+xurl -X POST -d "command=INIT&total_bytes=FILE_SIZE&media_type=video/mp4" /2/media/upload
+```
+
+2. Then, append the media chunks:
+```bash
+xurl -X POST -F path/to/file.mp4 /2/media/upload?command=APPEND&media_id=MEDIA_ID&segment_index=0
+```
+
+3. Finally, finalize the upload:
+```bash
+xurl -X POST -d "command=FINALIZE&media_id=MEDIA_ID" /2/media/upload
+```
+
+4. Check the status:
+```bash
+xurl /2/media/upload?command=STATUS&media_id=MEDIA_ID
 ```
 
 ## Token Storage

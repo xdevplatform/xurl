@@ -237,10 +237,8 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 	var token *store.Token
 	
 	if username != "" {
-		fmt.Printf("Getting OAuth2 token for username: %s\n", username)
 		token = a.TokenStore.GetOAuth2Token(username)
 	} else {
-		fmt.Println("Getting first OAuth2 token (no username provided)")
 		token = a.TokenStore.GetFirstOAuth2Token()
 	}
 	
@@ -292,12 +290,12 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 }
 
 // GetBearerTokenHeader gets the bearer token from the token store
-func (a *Auth) GetBearerTokenHeader() string {
+func (a *Auth) GetBearerTokenHeader() (string, error) {
 	token := a.TokenStore.GetBearerToken()
 	if token == nil {
-		return ""
+		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("bearer token not found"))
 	}
-	return "Bearer " + token.Bearer
+	return "Bearer " + token.Bearer, nil
 }
 
 func (a *Auth) fetchUsername(accessToken string) (string, error) {

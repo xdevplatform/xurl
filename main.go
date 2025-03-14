@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -38,6 +37,7 @@ func main() {
 			username, _ := cmd.Flags().GetString("username")
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			forceStream, _ := cmd.Flags().GetBool("stream")
+			mediaFile, _ := cmd.Flags().GetString("file")
 
 			// Check if URL is provided
 			if len(args) == 0 {
@@ -52,37 +52,11 @@ func main() {
 			// Create API client
 			client := api.NewApiClient(config, auth)
 
-			// Check if the endpoint should be streamed
-			shouldStream := forceStream || api.IsStreamingEndpoint(url)
-
-			if shouldStream {
-				// Make streaming request
-				clientErr := client.StreamRequest(method, url, headers, data, authType, username, verbose)
-				if clientErr != nil {
-					var rawJSON json.RawMessage
-					json.Unmarshal([]byte(clientErr.Message), &rawJSON)
-					prettyJSON, _ := json.MarshalIndent(rawJSON, "", "  ")
-					fmt.Println(string(prettyJSON))
-					os.Exit(1)
-				}
-			} else {
-				// Make regular request
-				response, clientErr := client.SendRequest(method, url, headers, data, authType, username, verbose)
-				if clientErr != nil {
-					var rawJSON json.RawMessage
-					json.Unmarshal([]byte(clientErr.Message), &rawJSON)
-					prettyJSON, _ := json.MarshalIndent(rawJSON, "", "  ")
-					fmt.Println(string(prettyJSON))
-					os.Exit(1)
-				}
-
-				// Pretty print the response
-				prettyJSON, err := json.MarshalIndent(response, "", "  ")
-				if err != nil {
-					fmt.Println("Error formatting JSON:", err)
-					os.Exit(1)
-				}
-				fmt.Println(string(prettyJSON))
+			// Handle the request
+			err := api.HandleRequest(method, url, headers, data, authType, username, verbose, forceStream, mediaFile, client)
+			if err != nil {
+				fmt.Printf("\033[31mError: %v\033[0m\n", err)
+				os.Exit(1)
 			}
 		},
 	}
@@ -95,6 +69,7 @@ func main() {
 	rootCmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	rootCmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	rootCmd.Flags().BoolP("stream", "s", false, "Force streaming mode for non-streaming endpoints")
+	rootCmd.Flags().StringP("file", "F", "", "File to upload (for multipart requests)")
 
 	// Create auth command
 	var authCmd = &cobra.Command{
@@ -111,6 +86,19 @@ func main() {
 
 	// Add auth command to root
 	rootCmd.AddCommand(authCmd)
+
+	// Create media command
+	var mediaCmd = &cobra.Command{
+		Use:   "media",
+		Short: "Media upload operations",
+	}
+
+	// Add media subcommands
+	mediaCmd.AddCommand(createMediaUploadCmd(auth))
+	mediaCmd.AddCommand(createMediaStatusCmd(auth))
+
+	// Add media command to root
+	rootCmd.AddCommand(mediaCmd)
 
 	// Execute the command
 	if err := rootCmd.Execute(); err != nil {
@@ -272,6 +260,76 @@ func createAuthClearCmd(auth *auth.Auth) *cobra.Command {
 	cmd.Flags().BoolVar(&oauth1, "oauth1", false, "Clear OAuth1 tokens")
 	cmd.Flags().StringVar(&oauth2Username, "oauth2-username", "", "Clear OAuth2 token for username")
 	cmd.Flags().BoolVar(&bearer, "bearer", false, "Clear bearer token")
+	
+	return cmd
+}
+
+// Create media upload subcommand
+func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
+	var mediaType, mediaCategory string
+	var waitForProcessing bool
+	
+	cmd := &cobra.Command{
+		Use:   "upload [flags] FILE",
+		Short: "Upload media file",
+		Long:  `Upload a media file to X API. Supports images, GIFs, and videos.`,
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			filePath := args[0]
+			authType, _ := cmd.Flags().GetString("auth")
+			username, _ := cmd.Flags().GetString("username")
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			
+			config := config.NewConfig()
+			client := api.NewApiClient(config, auth)
+			
+			err := api.ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username, verbose, waitForProcessing, client)
+			if err != nil {
+				fmt.Printf("\033[31m%v\033[0m\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	
+	cmd.Flags().StringVar(&mediaType, "media-type", "video/mp4", "Media type (e.g., image/jpeg, image/png, video/mp4)")
+	cmd.Flags().StringVar(&mediaCategory, "category", "amplify_video", "Media category (e.g., tweet_image, tweet_video, amplify_video)")
+	cmd.Flags().BoolVar(&waitForProcessing, "wait", true, "Wait for media processing to complete")
+	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
+	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
+	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
+	
+	return cmd
+}
+
+// Create media status subcommand
+func createMediaStatusCmd(auth *auth.Auth) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status [flags] MEDIA_ID",
+		Short: "Check media upload status",
+		Long:  `Check the status of a media upload by media ID.`,
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			mediaID := args[0]
+			authType, _ := cmd.Flags().GetString("auth")
+			username, _ := cmd.Flags().GetString("username")
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			wait, _ := cmd.Flags().GetBool("wait")
+			
+			config := config.NewConfig()
+			client := api.NewApiClient(config, auth)
+			
+			err := api.ExecuteMediaStatus(mediaID, authType, username, verbose, wait, client)
+			if err != nil {
+				fmt.Printf("\033[31m%v\033[0m\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	
+	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
+	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
+	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
+	cmd.Flags().BoolP("wait", "w", false, "Wait for media processing to complete")
 	
 	return cmd
 } 

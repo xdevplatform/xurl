@@ -86,18 +86,21 @@ func TestBearerToken(t *testing.T) {
 	auth = auth.WithTokenStore(tokenStore)
 	
 	// Test with no bearer token
-	token := auth.GetBearerTokenHeader()
-	if token != "" {
+	token, err := auth.GetBearerTokenHeader()
+	if err == nil {
 		t.Errorf("Expected empty token, got %s", token)
 	}
 	
 	// Test with bearer token
-	err := tokenStore.SaveBearerToken("test-bearer-token")
+	err = tokenStore.SaveBearerToken("test-bearer-token")
 	if err != nil {
 		t.Fatalf("Failed to save bearer token: %v", err)
 	}
 	
-	token = auth.GetBearerTokenHeader()
+	token, err = auth.GetBearerTokenHeader()
+	if err != nil {
+		t.Fatalf("Failed to get bearer token: %v", err)
+	}
 	if token != "Bearer test-bearer-token" {
 		t.Errorf("Expected 'Bearer test-bearer-token', got %s", token)
 	}
