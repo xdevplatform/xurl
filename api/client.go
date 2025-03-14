@@ -365,11 +365,6 @@ func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, dat
 		return xurlErrors.NewAPIError(js)
 	}
 	
-	contentType = resp.Header.Get("Content-Type")
-	isJSON := strings.Contains(contentType, "application/json") || 
-		strings.Contains(contentType, "application/x-ndjson") ||
-		strings.Contains(contentType, "application/stream+json")
-	
 	scanner := bufio.NewScanner(resp.Body)
 	
 	const maxScanTokenSize = 1024 * 1024
@@ -385,22 +380,8 @@ func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, dat
 		if line == "" {
 			continue
 		}
-		
-		if isJSON {
-			var js json.RawMessage
-			if err := json.Unmarshal([]byte(line), &js); err != nil {
-				fmt.Println(line)
-			} else {
-				prettyJSON, err := json.MarshalIndent(js, "", "  ")
-				if err != nil {
-					fmt.Println(line)
-				} else {
-					fmt.Println(string(prettyJSON))
-				}
-			}
-		} else {
-			fmt.Println(line)
-		}
+		// We can't pretty-print streaming responses
+		fmt.Println(line)
 	}
 	
 	if err := scanner.Err(); err != nil {
