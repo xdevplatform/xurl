@@ -279,11 +279,11 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 			authType, _ := cmd.Flags().GetString("auth")
 			username, _ := cmd.Flags().GetString("username")
 			verbose, _ := cmd.Flags().GetBool("verbose")
-			
+			headers, _ := cmd.Flags().GetStringArray("header")
 			config := config.NewConfig()
 			client := api.NewApiClient(config, auth)
 			
-			err := api.ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username, verbose, waitForProcessing, client)
+			err := api.ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username, verbose, waitForProcessing, headers, client)
 			if err != nil {
 				fmt.Printf("\033[31m%v\033[0m\n", err)
 				os.Exit(1)
@@ -297,6 +297,7 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
+	cmd.Flags().StringArrayP("header", "H", []string{}, "Request headers")
 	
 	return cmd
 }
@@ -314,11 +315,11 @@ func createMediaStatusCmd(auth *auth.Auth) *cobra.Command {
 			username, _ := cmd.Flags().GetString("username")
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			wait, _ := cmd.Flags().GetBool("wait")
-			
+			headers, _ := cmd.Flags().GetStringArray("header")
 			config := config.NewConfig()
 			client := api.NewApiClient(config, auth)
 			
-			err := api.ExecuteMediaStatus(mediaID, authType, username, verbose, wait, client)
+			err := api.ExecuteMediaStatus(mediaID, authType, username, verbose, wait, headers, client)
 			if err != nil {
 				fmt.Printf("\033[31m%v\033[0m\n", err)
 				os.Exit(1)
@@ -330,6 +331,6 @@ func createMediaStatusCmd(auth *auth.Auth) *cobra.Command {
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	cmd.Flags().BoolP("wait", "w", false, "Wait for media processing to complete")
-	
+	cmd.Flags().StringArrayP("header", "H", []string{}, "Request headers")
 	return cmd
 } 

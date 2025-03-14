@@ -185,12 +185,11 @@ func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data 
 		var js json.RawMessage
 		if json.Unmarshal([]byte(data), &js) == nil {
 			contentType = "application/json"
-		} else {
-			contentType = "application/x-www-form-urlencoded"
 		}
 	}
 	
 	req, err := c.BuildRequest(method, endpoint, headers, body, contentType, authType, username)
+	
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
 	}

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"xurl/errors"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Represents OAuth1 authentication tokens
@@ -76,7 +78,64 @@ func NewTokenStore() *TokenStore {
 		}
 	}
 
+	// Either .xurl doesn't exist or we don't have OAuth1 tokens
+	if store.OAuth1Token == nil {
+		twurlPath := filepath.Join(homeDir, ".twurlrc")
+		if _, err := os.Stat(twurlPath); err == nil {
+			if err := store.importFromTwurlrc(twurlPath); err != nil {
+				fmt.Println("Error importing from .twurlrc:", err)
+			}
+		}
+	}
+
 	return store
+}
+
+// Imports tokens from a twurlrc file
+func (s *TokenStore) importFromTwurlrc(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return errors.NewIOError(err)
+	}
+
+	var twurlConfig struct {
+		Profiles map[string]map[string]struct {
+			Username      string `yaml:"username"`
+			ConsumerKey   string `yaml:"consumer_key"`
+			ConsumerSecret string `yaml:"consumer_secret"`
+			Token         string `yaml:"token"`
+			Secret        string `yaml:"secret"`
+		} `yaml:"profiles"`
+		Configuration struct {
+			DefaultProfile []string `yaml:"default_profile"`
+		} `yaml:"configuration"`
+	}
+
+	if err := yaml.Unmarshal(data, &twurlConfig); err != nil {
+		return errors.NewJSONError(err)
+	}
+
+	// Import OAuth1 tokens from twurlrc
+	for _, consumerKeys := range twurlConfig.Profiles {
+		for consumerKey, profile := range consumerKeys {
+			if s.OAuth1Token == nil {
+				s.OAuth1Token = &Token{
+					Type: OAuth1TokenType,
+					OAuth1: &OAuth1Token{
+						AccessToken:    profile.Token,
+						TokenSecret:    profile.Secret,
+						ConsumerKey:    consumerKey,
+						ConsumerSecret: profile.ConsumerSecret,
+					},
+				}
+			}
+			
+			break
+		}
+		break
+	}
+
+	return s.saveToFile()
 }
 
 // 	aves a bearer token

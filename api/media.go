@@ -14,7 +14,7 @@ import (
 
 const (
 	// MediaEndpoint is the endpoint for media uploads
-	MediaEndpoint = "https://api.x.com/2/media/upload"
+	MediaEndpoint = "/2/media/upload"
 )
 
 // MediaUploader handles media upload operations
@@ -26,10 +26,11 @@ type MediaUploader struct {
 	verbose bool
 	authType string
 	username string
+	headers []string
 }
 
 // NewMediaUploader creates a new MediaUploader
-func NewMediaUploader(client *ApiClient, filePath string, verbose bool, authType string, username string) (*MediaUploader, error) {
+func NewMediaUploader(client *ApiClient, filePath string, verbose bool, authType string, username string, headers []string) (*MediaUploader, error) {
 	// Check if file exists
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
@@ -48,6 +49,7 @@ func NewMediaUploader(client *ApiClient, filePath string, verbose bool, authType
 		verbose: verbose,
 		authType: authType,
 		username: username,
+		headers: headers,
 	}, nil
 }
 
@@ -57,29 +59,13 @@ func (m *MediaUploader) Init(mediaType string, mediaCategory string) error {
 		fmt.Printf("\033[32mInitializing media upload...\033[0m\n")
 	}
 
-	formData := map[string]string{
-		"command": "INIT",
-		"total_bytes": strconv.FormatInt(m.fileSize, 10),
-		"media_type": mediaType,
-	}
+	finalUrl := MediaEndpoint + 
+		"?command=INIT" + 
+		"&total_bytes=" + strconv.FormatInt(m.fileSize, 10) + 
+		"&media_type=" + mediaType + 
+		"&media_category=" + mediaCategory
 
-	if mediaCategory != "" {
-		formData["media_category"] = mediaCategory
-	}
-
-	formDataStr := ""
-	for key, value := range formData {
-		if formDataStr != "" {
-			formDataStr += "&"
-		}
-		formDataStr += key + "=" + value
-	}
-
-	headers := []string{
-		"Content-Type: application/x-www-form-urlencoded",
-	}
-
-	response, clientErr := m.client.SendRequest("POST", MediaEndpoint, headers, formDataStr, m.authType, m.username, m.verbose)
+	response, clientErr := m.client.SendRequest("POST", finalUrl, m.headers, "", m.authType, m.username, m.verbose)
 	if clientErr != nil {
 		return fmt.Errorf("init request failed: %v", clientErr)
 	}
@@ -148,7 +134,7 @@ func (m *MediaUploader) Append() error {
 		_, clientErr := m.client.SendMultipartRequestWithBuffer(
 			"POST",
 			MediaEndpoint,
-			[]string{},
+			m.headers,
 			formFields,
 			"media",
 			filepath.Base(m.filePath),
@@ -187,19 +173,10 @@ func (m *MediaUploader) Finalize() (json.RawMessage, error) {
 		fmt.Printf("\033[32mFinalizing media upload...\033[0m\n")
 	}
 
-	formData := "command=FINALIZE&media_id=" + m.mediaID
-
-	headers := []string{
-		"Content-Type: application/x-www-form-urlencoded",
-	}
-
-	response, clientErr := m.client.SendRequest("POST", MediaEndpoint, headers, formData, m.authType, m.username, m.verbose)
+	finalUrl := MediaEndpoint + "?command=FINALIZE&media_id=" + m.mediaID
+	response, clientErr := m.client.SendRequest("POST", finalUrl, m.headers, "", m.authType, m.username, m.verbose)
 	if clientErr != nil {
 		return nil, fmt.Errorf("finalize request failed: %v", clientErr)
-	}
-
-	if m.verbose {
-		utils.FormatAndPrintResponse(response)
 	}
 
 	return response, nil
@@ -295,8 +272,8 @@ func (m *MediaUploader) SetMediaID(mediaID string) {
 }
 
 // ExecuteMediaUpload handles the media upload command execution
-func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username string, verbose, waitForProcessing bool, client *ApiClient) error {
-	uploader, err := NewMediaUploader(client, filePath, verbose, authType, username)
+func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username string, verbose, waitForProcessing bool, headers []string, client *ApiClient) error {
+	uploader, err := NewMediaUploader(client, filePath, verbose, authType, username, headers)
 	if err != nil {
 		return fmt.Errorf("error: %v", err)
 	}
@@ -317,8 +294,7 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 	utils.FormatAndPrintResponse(finalizeResponse)
 	
 	// Wait for processing if requested
-	if waitForProcessing {
-		fmt.Printf("\033[32mWaiting for media processing to complete...\033[0m\n")
+	if waitForProcessing && strings.Contains(mediaCategory, "video") {
 		processingResponse, err := uploader.WaitForProcessing()
 		if err != nil {
 			return fmt.Errorf("error during media processing: %v", err)
@@ -332,9 +308,9 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 }
 
 // ExecuteMediaStatus handles the media status command execution
-func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, client *ApiClient) error {
+func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, headers []string, client *ApiClient) error {
 	// Create media uploader
-	uploader, err := NewMediaUploader(client, "", verbose, authType, username)
+	uploader, err := NewMediaUploader(client, "", verbose, authType, username, headers)
 	if err != nil {
 		return fmt.Errorf("error: %v", err)
 	}
