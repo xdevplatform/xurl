@@ -57,7 +57,7 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 	cmd.Flags().BoolVar(&waitForProcessing, "wait", true, "Wait for media processing to complete")
 	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
-	cmd.Flags().Bool("verbose", false, "Print verbose information")
+	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	cmd.Flags().StringArrayP("header", "H", []string{}, "Request headers")
 	
 	return cmd
