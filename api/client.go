@@ -17,6 +17,7 @@ import (
 	"xurl/auth"
 	"xurl/config"
 	xurlErrors "xurl/errors"
+	"xurl/version"
 )
 
 // ApiClient handles API requests
@@ -121,6 +122,8 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, body
 			req.Header.Add("Authorization", authHeader)
 		}
 	}
+
+	req.Header.Add("User-Agent", "xurl/"+version.Version)
 	
 	return req, nil
 }
