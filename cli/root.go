@@ -70,6 +70,7 @@ Examples:
 	rootCmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
 	rootCmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	rootCmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
+	rootCmd.Flags().BoolP("trace", "t", false, "Add trace header to request")
 	rootCmd.Flags().BoolP("stream", "s", false, "Force streaming mode for non-streaming endpoints")
 	rootCmd.Flags().StringP("file", "F", "", "File to upload (for multipart requests)")
 

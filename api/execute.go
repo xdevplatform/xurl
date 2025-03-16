@@ -3,12 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"xurl/errors"
 	"xurl/utils"
 )
 
 // ExecuteRequest handles the execution of a regular API request
-func ExecuteRequest(method, url string, headers []string, data, authType, username string, verbose bool, client *ApiClient) error {
+func ExecuteRequest(method, url string, headers []string, data, authType, username string, verbose bool, client Client) error {
 	response, clientErr := client.SendRequest(method, url, headers, data, authType, username, verbose)
 	if clientErr != nil {
 		return handleRequestError(clientErr)
@@ -18,7 +17,7 @@ func ExecuteRequest(method, url string, headers []string, data, authType, userna
 }
 
 // ExecuteStreamRequest handles the execution of a streaming API request
-func ExecuteStreamRequest(method, url string, headers []string, data, authType, username string, verbose bool, client *ApiClient) error {
+func ExecuteStreamRequest(method, url string, headers []string, data, authType, username string, verbose bool, client Client) error {
 	clientErr := client.StreamRequest(method, url, headers, data, authType, username, verbose)
 	if clientErr != nil {
 		return handleRequestError(clientErr)
@@ -28,9 +27,9 @@ func ExecuteStreamRequest(method, url string, headers []string, data, authType, 
 }
 
 // handleRequestError processes API client errors in a consistent way
-func handleRequestError(clientErr *errors.Error) error {
+func handleRequestError(clientErr error) error {
 	var rawJSON json.RawMessage
-	json.Unmarshal([]byte(clientErr.Message), &rawJSON)
+	json.Unmarshal([]byte(clientErr.Error()), &rawJSON)
 	utils.FormatAndPrintResponse(rawJSON)
 	return fmt.Errorf("request failed")
 }
@@ -38,7 +37,7 @@ func handleRequestError(clientErr *errors.Error) error {
 // formatAndPrintResponse formats and prints API responses
 
 // HandleRequest determines the type of request and executes it accordingly
-func HandleRequest(method, url string, headers []string, data, authType, username string, verbose, forceStream bool, mediaFile string, client *ApiClient) error {
+func HandleRequest(method, url string, headers []string, data, authType, username string, verbose, forceStream bool, mediaFile string, client Client) error {
 	if IsMediaAppendRequest(url, mediaFile) {
 		response, err := HandleMediaAppendRequest(url, mediaFile, method, headers, data, authType, username, verbose, client)
 		if err != nil {

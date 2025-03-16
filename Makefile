@@ -18,6 +18,9 @@ test:
 format:
 	go fmt ./...
 
+.PHONY: all
+all: build test format 
+
 .PHONY: release
 release:
 	goreleaser release --clean

@@ -20,6 +20,16 @@ import (
 	"xurl/version"
 )
 
+// Client is an interface for API clients
+type Client interface {
+	GetAuthHeader(method, url string, authType string, username string) (string, error)
+	BuildRequest(method, endpoint string, headers []string, body io.Reader, contentType string, authType string, username string) (*http.Request, error)
+	SendRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) (json.RawMessage, error)
+	StreamRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) error
+	SendMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, fileField, filePath string, authType string, username string, verbose bool) (json.RawMessage, error)
+	SendMultipartRequestWithBuffer(method, endpoint string, headers []string, formFields map[string]string, fileField, fileName string, fileData []byte, authType string, username string, verbose bool) (json.RawMessage, error)
+}
+
 // ApiClient handles API requests
 type ApiClient struct {
 	url  string
@@ -129,7 +139,7 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, body
 }
 
 // processResponse handles common response processing logic
-func (c *ApiClient) processResponse(resp *http.Response, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+func (c *ApiClient) processResponse(resp *http.Response, verbose bool) (json.RawMessage, error) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, xurlErrors.NewIOError(err)
@@ -178,7 +188,7 @@ func (c *ApiClient) logRequest(req *http.Request, verbose bool) {
 }
 
 // SendRequest sends an HTTP request
-func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) (json.RawMessage, error) {
 	var body io.Reader
 	contentType := ""
 	
@@ -210,7 +220,7 @@ func (c *ApiClient) SendRequest(method, endpoint string, headers []string, data 
 
 // prepareMultipartRequest prepares a multipart request with common setup
 func (c *ApiClient) prepareMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, 
-	writer *multipart.Writer, body *bytes.Buffer, authType string, username string) (*http.Request, *xurlErrors.Error) {
+	writer *multipart.Writer, body *bytes.Buffer, authType string, username string) (*http.Request, error) {
 	
 	for key, value := range formFields {
 		if err := writer.WriteField(key, value); err != nil {
@@ -231,7 +241,7 @@ func (c *ApiClient) prepareMultipartRequest(method, endpoint string, headers []s
 }
 
 // SendMultipartRequest sends an HTTP request with multipart form data
-func (c *ApiClient) SendMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, fileField, filePath string, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+func (c *ApiClient) SendMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, fileField, filePath string, authType string, username string, verbose bool) (json.RawMessage, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	
@@ -269,7 +279,7 @@ func (c *ApiClient) SendMultipartRequest(method, endpoint string, headers []stri
 }
 
 // SendMultipartRequestWithBuffer sends an HTTP request with multipart form data using a buffer for file data
-func (c *ApiClient) SendMultipartRequestWithBuffer(method, endpoint string, headers []string, formFields map[string]string, fileField, fileName string, fileData []byte, authType string, username string, verbose bool) (json.RawMessage, *xurlErrors.Error) {
+func (c *ApiClient) SendMultipartRequestWithBuffer(method, endpoint string, headers []string, formFields map[string]string, fileField, fileName string, fileData []byte, authType string, username string, verbose bool) (json.RawMessage, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	
@@ -301,7 +311,7 @@ func (c *ApiClient) SendMultipartRequestWithBuffer(method, endpoint string, head
 }
 
 // StreamRequest sends an HTTP request and streams the response
-func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) *xurlErrors.Error {
+func (c *ApiClient) StreamRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) error {
 	var body io.Reader
 	contentType := ""
 	

@@ -19,7 +19,7 @@ const (
 
 // MediaUploader handles media upload operations
 type MediaUploader struct {
-	client *ApiClient
+	client Client
 	mediaID string
 	filePath string
 	fileSize int64
@@ -30,8 +30,7 @@ type MediaUploader struct {
 }
 
 // NewMediaUploader creates a new MediaUploader
-func NewMediaUploader(client *ApiClient, filePath string, verbose bool, authType string, username string, headers []string) (*MediaUploader, error) {
-	// Check if file exists
+func NewMediaUploader(client Client, filePath string, verbose bool, authType string, username string, headers []string) (*MediaUploader, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error accessing file: %v", err)
@@ -51,6 +50,16 @@ func NewMediaUploader(client *ApiClient, filePath string, verbose bool, authType
 		username: username,
 		headers: headers,
 	}, nil
+}
+
+func NewMediaUploaderWithoutFile(client Client, verbose bool, authType string, username string, headers []string) *MediaUploader {
+	return &MediaUploader{
+		client: client,
+		verbose: verbose,
+		authType: authType,
+		username: username,
+		headers: headers,
+	}
 }
 
 // Init initializes the media upload
@@ -272,7 +281,7 @@ func (m *MediaUploader) SetMediaID(mediaID string) {
 }
 
 // ExecuteMediaUpload handles the media upload command execution
-func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username string, verbose, waitForProcessing bool, headers []string, client *ApiClient) error {
+func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username string, verbose, waitForProcessing bool, headers []string, client Client) error {
 	uploader, err := NewMediaUploader(client, filePath, verbose, authType, username, headers)
 	if err != nil {
 		return fmt.Errorf("error: %v", err)
@@ -308,37 +317,28 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 }
 
 // ExecuteMediaStatus handles the media status command execution
-func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, headers []string, client *ApiClient) error {
-	// Create media uploader
-	uploader, err := NewMediaUploader(client, "", verbose, authType, username, headers)
-	if err != nil {
-		return fmt.Errorf("error: %v", err)
-	}
+func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, headers []string, client Client) error {
+	uploader := NewMediaUploaderWithoutFile(client, verbose, authType, username, headers)
 	
-	// Set media ID
 	uploader.SetMediaID(mediaID)
 	
 	if wait {
-		// Wait for processing
 		processingResponse, err := uploader.WaitForProcessing()
 		if err != nil {
 			return fmt.Errorf("error during media processing: %v", err)
 		}
 		
-		// Pretty print the processing response
 		prettyJSON, err := json.MarshalIndent(processingResponse, "", "  ")
 		if err != nil {
 			return fmt.Errorf("error formatting JSON: %v", err)
 		}
 		fmt.Println(string(prettyJSON))
 	} else {
-		// Just check status once
 		statusResponse, err := uploader.CheckStatus()
 		if err != nil {
 			return fmt.Errorf("error checking status: %v", err)
 		}
 		
-		// Pretty print the status response
 		prettyJSON, err := json.MarshalIndent(statusResponse, "", "  ")
 		if err != nil {
 			return fmt.Errorf("error formatting JSON: %v", err)
@@ -350,7 +350,7 @@ func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, 
 }
 
 // HandleMediaAppendRequest handles a media append request with a file
-func HandleMediaAppendRequest(url, mediaFile, method string, headers []string, data, authType, username string, verbose bool, client *ApiClient) (json.RawMessage, error) {
+func HandleMediaAppendRequest(url, mediaFile, method string, headers []string, data, authType, username string, verbose bool, client Client) (json.RawMessage, error) {
 	mediaID := ExtractMediaID(url, data)
 	if mediaID == "" {
 		return nil, fmt.Errorf("media_id is required for APPEND command")
@@ -358,7 +358,7 @@ func HandleMediaAppendRequest(url, mediaFile, method string, headers []string, d
 	
 	segmentIndex := ExtractSegmentIndex(url, data)
 	if segmentIndex == "" {
-		segmentIndex = "0" // Default to 0 if not specified
+		segmentIndex = "0"
 	}
 	
 	formFields := map[string]string{

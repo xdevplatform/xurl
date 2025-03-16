@@ -15,17 +15,18 @@ import (
 	"xurl/config"
 	xurlErrors "xurl/errors"
 	"xurl/store"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Helper function to create a temporary token store for testing
 func createTempTokenStore(t *testing.T) (*store.TokenStore, string) {
-	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "xurl_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	
-	// Create a token store with a file in the temp directory
 	tempFile := filepath.Join(tempDir, "tokens.json")
 	tokenStore := &store.TokenStore{
 		OAuth2Tokens: make(map[string]store.Token),
@@ -50,7 +51,6 @@ func createMockAuth(t *testing.T) (*auth.Auth, string) {
 	mockAuth := auth.NewAuth(cfg)
 	tokenStore, tempDir := createTempTokenStore(t)
 	
-	// Add a test bearer token
 	err := tokenStore.SaveBearerToken("test-bearer-token")
 	if err != nil {
 		t.Fatalf("Failed to save bearer token: %v", err)
@@ -69,17 +69,9 @@ func TestNewApiClient(t *testing.T) {
 	
 	client := NewApiClient(cfg, auth)
 	
-	if client.url != cfg.APIBaseURL {
-		t.Errorf("Expected URL to be %s, got %s", cfg.APIBaseURL, client.url)
-	}
-	
-	if client.auth != auth {
-		t.Errorf("Expected auth to be set correctly")
-	}
-	
-	if client.client == nil {
-		t.Errorf("HTTP client should not be nil")
-	}
+	assert.Equal(t, cfg.APIBaseURL, client.url, "URL should match config")
+	assert.Equal(t, auth, client.auth, "Auth should be set correctly")
+	assert.NotNil(t, client.client, "HTTP client should not be nil")
 }
 
 func TestBuildRequest(t *testing.T) {
@@ -159,43 +151,29 @@ func TestBuildRequest(t *testing.T) {
 			
 			req, err := client.BuildRequest(tt.method, tt.endpoint, tt.headers, body, contentType, tt.authType, tt.username)
 			
-			if (err != nil) != tt.wantErr {
-				t.Errorf("BuildRequest() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err)
 				return
 			}
 			
-			if err != nil {
-				return
-			}
-			
-			if req.Method != tt.wantMethod {
-				t.Errorf("BuildRequest() method = %v, want %v", req.Method, tt.wantMethod)
-			}
-			
-			if req.URL.String() != tt.wantURL {
-				t.Errorf("BuildRequest() URL = %v, want %v", req.URL.String(), tt.wantURL)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantMethod, req.Method)
+			assert.Equal(t, tt.wantURL, req.URL.String())
 			
 			for _, header := range tt.headers {
 				parts := strings.Split(header, ": ")
-				if len(parts) != 2 {
-					t.Errorf("Invalid header format: %s", header)
-					continue
-				}
+				require.Len(t, parts, 2, "Invalid header format: %s", header)
 				
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
 				
-				if req.Header.Get(key) != value {
-					t.Errorf("BuildRequest() header %s = %s, want %s", key, req.Header.Get(key), value)
-				}
-			}	
+				assert.Equal(t, value, req.Header.Get(key))
+			}
+
+			assert.Equal(t, "xurl/dev", req.Header.Get("User-Agent"))
 			
 			if tt.method == "POST" && tt.data != "" {
-				contentType := req.Header.Get("Content-Type")
-				if contentType != "application/json" {
-					t.Errorf("Expected Content-Type header to be application/json, got %s", contentType)
-				}
+				assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
 			}
 		})
 	}
@@ -228,7 +206,6 @@ func TestSendRequest(t *testing.T) {
 	}))
 	defer server.Close()
 	
-	// Setup client
 	cfg := &config.Config{
 		APIBaseURL: server.URL,
 	}
@@ -240,70 +217,40 @@ func TestSendRequest(t *testing.T) {
 	t.Run("Get user profile", func(t *testing.T) {
 		resp, err := client.SendRequest("GET", "/2/users/me", []string{"Authorization: Bearer test-token"}, "", "", "", false)
 		
-		if err != nil {
-			t.Errorf("SendRequest() error = %v", err)
-			return
-		}
+		require.NoError(t, err)
 		
 		var result map[string]interface{}
-		if e := json.Unmarshal(resp, &result); e != nil {
-			t.Errorf("Failed to parse response: %v", e)
-			return
-		}
+		err = json.Unmarshal(resp, &result)
+		require.NoError(t, err, "Failed to parse response")
 		
 		data, ok := result["data"].(map[string]interface{})
-		if !ok {
-			t.Errorf("Expected data object in response")
-			return
-		}
+		require.True(t, ok, "Expected data object in response")
 		
-		if username, ok := data["username"]; !ok || username != "testuser" {
-			t.Errorf("Expected username 'testuser', got %v", username)
-		}
+		assert.Equal(t, "testuser", data["username"], "Username should match")
 	})
 	
 	// Test successful POST request
 	t.Run("Post tweet", func(t *testing.T) {
 		resp, err := client.SendRequest("POST", "/2/tweets", []string{"Authorization: Bearer test-token"}, `{"text":"Hello world!"}`, "", "", false)
 		
-		if err != nil {
-			t.Errorf("SendRequest() error = %v", err)
-			return
-		}
+		require.NoError(t, err)
 		
 		var result map[string]interface{}
-		if e := json.Unmarshal(resp, &result); e != nil {
-			t.Errorf("Failed to parse response: %v", e)
-			return
-		}
+		err = json.Unmarshal(resp, &result)
+		require.NoError(t, err, "Failed to parse response")
 		
 		data, ok := result["data"].(map[string]interface{})
-		if !ok {
-			t.Errorf("Expected data object in response")
-			return
-		}
+		require.True(t, ok, "Expected data object in response")
 		
-		if text, ok := data["text"]; !ok || text != "Hello world!" {
-			t.Errorf("Expected text 'Hello world!', got %v", text)
-		}
+		assert.Equal(t, "Hello world!", data["text"], "Tweet text should match")
 	})
 	
-	// Test error response
 	t.Run("Error response", func(t *testing.T) {
 		resp, err := client.SendRequest("GET", "/2/tweets/search/recent", []string{"Authorization: Bearer test-token"}, "", "", "", false)
 		
-		if err == nil {
-			t.Errorf("SendRequest() expected error, got nil")
-			return
-		}
-		
-		if resp != nil {
-			t.Errorf("SendRequest() expected nil response, got %v", resp)
-		}
-		
-		if !xurlErrors.IsAPIError(err) {
-			t.Errorf("Expected API error, got %v", err)
-		}
+		assert.Error(t, err, "Expected an error")
+		assert.Nil(t, resp, "Response should be nil")
+		assert.True(t, xurlErrors.IsAPIError(err), "Expected API error")
 	})
 }
 
@@ -317,13 +264,8 @@ func TestGetAuthHeader(t *testing.T) {
 		
 		_, err := client.GetAuthHeader("GET", "https://api.x.com/2/users/me", "", "")
 		
-		if err == nil {
-			t.Errorf("GetAuthHeader() expected error, got nil")
-		}
-		
-		if !xurlErrors.IsAuthError(err) {
-			t.Errorf("Expected auth error, got %v", err)
-		}
+		assert.Error(t, err, "Expected an error")
+		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
 	})
 	
 	t.Run("Invalid auth type", func(t *testing.T) {
@@ -333,13 +275,8 @@ func TestGetAuthHeader(t *testing.T) {
 		
 		_, err := client.GetAuthHeader("GET", "https://api.x.com/2/users/me", "invalid", "")
 		
-		if err == nil {
-			t.Errorf("GetAuthHeader() expected error, got nil")
-		}
-		
-		if !xurlErrors.IsAuthError(err) {
-			t.Errorf("Expected auth error, got %v", err)
-		}
+		assert.Error(t, err, "Expected an error")
+		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
 	})
 }
 
@@ -377,14 +314,7 @@ func TestStreamRequest(t *testing.T) {
 	t.Run("Stream error response", func(t *testing.T) {
 		err := client.StreamRequest("GET", "/2/tweets/search/stream/error", []string{"Authorization: Bearer test-token"}, "", "", "", false)
 		
-		if err == nil {
-			t.Errorf("StreamRequest() expected error, got nil")
-			return
-		}
-		
-		// Check if it's an API error
-		if !xurlErrors.IsAPIError(err) {
-			t.Errorf("Expected API error, got %v", err)
-		}
+		assert.Error(t, err, "Expected an error")
+		assert.True(t, xurlErrors.IsAPIError(err), "Expected API error")
 	})
 }

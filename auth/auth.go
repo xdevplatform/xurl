@@ -96,7 +96,7 @@ func (a *Auth) GetOAuth1Header(method, urlStr string, additionalParams map[strin
 	
 	signature, err := generateSignature(method, urlStr, params, oauth1Token.ConsumerSecret, oauth1Token.TokenSecret)
 	if err != nil {
-		return "", err
+		return "", xurlErrors.NewAuthError("SignatureGenerationError", err)
 	}
 
 	
@@ -128,7 +128,7 @@ func (a *Auth) GetOAuth2Header(username string) (string, error) {
 	
 	accessToken, err := a.RefreshOAuth2Token(username)
 	if err != nil {
-		return "", err
+		return "", xurlErrors.NewAuthError("RefreshTokenError", err)
 	}
 	return "Bearer " + accessToken, nil
 }
@@ -274,7 +274,7 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 	} else {
 		fetchedUsername, err := a.fetchUsername(newToken.AccessToken)
 		if err != nil {
-			return "", err
+			return "", xurlErrors.NewAuthError("UsernameFetchError", err)
 		}
 		usernameStr = fetchedUsername
 	}

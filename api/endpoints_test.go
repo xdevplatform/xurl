@@ -2,6 +2,8 @@ package api
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestIsStreamingEndpoint(t *testing.T) {
@@ -41,9 +43,7 @@ func TestIsStreamingEndpoint(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.endpoint, func(t *testing.T) {
 			result := IsStreamingEndpoint(tc.endpoint)
-			if result != tc.expected {
-				t.Errorf("IsStreamingEndpoint(%q) = %v, expected %v", tc.endpoint, result, tc.expected)
-			}
+			assert.Equal(t, tc.expected, result, "IsStreamingEndpoint(%q) should return %v", tc.endpoint, tc.expected)
 		})
 	}
 } 

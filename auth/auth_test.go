@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"xurl/config"
 	"xurl/store"
 )
@@ -40,13 +43,8 @@ func TestNewAuth(t *testing.T) {
 	
 	auth := NewAuth(cfg)
 	
-	if auth == nil {
-		t.Fatal("Expected non-nil Auth")
-	}
-	
-	if auth.TokenStore == nil {
-		t.Error("Expected non-nil TokenStore")
-	}
+	require.NotNil(t, auth, "Expected non-nil Auth")
+	assert.NotNil(t, auth.TokenStore, "Expected non-nil TokenStore")
 }
 
 func TestWithTokenStore(t *testing.T) {
@@ -67,13 +65,8 @@ func TestWithTokenStore(t *testing.T) {
 	
 	newAuth := auth.WithTokenStore(tokenStore)
 	
-	if newAuth == nil {
-		t.Fatal("Expected non-nil Auth")
-	}
-	
-	if newAuth.TokenStore != tokenStore {
-		t.Error("Expected TokenStore to be set to the provided TokenStore")
-	}
+	require.NotNil(t, newAuth, "Expected non-nil Auth")
+	assert.Equal(t, tokenStore, newAuth.TokenStore, "Expected TokenStore to be set to the provided TokenStore")
 }
 
 func TestBearerToken(t *testing.T) {
@@ -86,51 +79,33 @@ func TestBearerToken(t *testing.T) {
 	auth = auth.WithTokenStore(tokenStore)
 	
 	// Test with no bearer token
-	token, err := auth.GetBearerTokenHeader()
-	if err == nil {
-		t.Errorf("Expected empty token, got %s", token)
-	}
+	_, err := auth.GetBearerTokenHeader()
+	assert.Error(t, err, "Expected error when no bearer token is set")
 	
 	// Test with bearer token
 	err = tokenStore.SaveBearerToken("test-bearer-token")
-	if err != nil {
-		t.Fatalf("Failed to save bearer token: %v", err)
-	}
+	require.NoError(t, err, "Failed to save bearer token")
 	
-	token, err = auth.GetBearerTokenHeader()
-	if err != nil {
-		t.Fatalf("Failed to get bearer token: %v", err)
-	}
-	if token != "Bearer test-bearer-token" {
-		t.Errorf("Expected 'Bearer test-bearer-token', got %s", token)
-	}
+	token, err := auth.GetBearerTokenHeader()
+	require.NoError(t, err, "Failed to get bearer token")
+	assert.Equal(t, "Bearer test-bearer-token", token, "Expected correct bearer token format")
 }
 
 func TestGenerateNonce(t *testing.T) {
 	nonce1 := generateNonce()
 	nonce2 := generateNonce()
 	
-	if nonce1 == "" {
-		t.Error("Expected non-empty nonce")
-	}
-	
-	if nonce1 == nonce2 {
-		t.Error("Expected different nonces")
-	}
+	assert.NotEmpty(t, nonce1, "Expected non-empty nonce")
+	assert.NotEqual(t, nonce1, nonce2, "Expected different nonces")
 }
 
 func TestGenerateTimestamp(t *testing.T) {
 	timestamp := generateTimestamp()
 	
-	if timestamp == "" {
-		t.Error("Expected non-empty timestamp")
-	}
+	assert.NotEmpty(t, timestamp, "Expected non-empty timestamp")
 	
 	for _, c := range timestamp {
-		if c < '0' || c > '9' {
-			t.Errorf("Expected timestamp to contain only digits, got %s", timestamp)
-			break
-		}
+		assert.True(t, c >= '0' && c <= '9', "Expected timestamp to contain only digits, got %s", timestamp)
 	}
 }
 
@@ -150,9 +125,7 @@ func TestEncode(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.input, func(t *testing.T) {
 			result := encode(tc.input)
-			if result != tc.expected {
-				t.Errorf("encode(%q) = %q, expected %q", tc.input, result, tc.expected)
-			}
+			assert.Equal(t, tc.expected, result, "encode(%q) should return %q", tc.input, result)
 		})
 	}
 }
@@ -160,44 +133,17 @@ func TestEncode(t *testing.T) {
 func TestGenerateCodeVerifierAndChallenge(t *testing.T) {
 	verifier, challenge := generateCodeVerifierAndChallenge()
 	
-	if verifier == "" {
-		t.Error("Expected non-empty verifier")
-	}
-	
-	if challenge == "" {
-		t.Error("Expected non-empty challenge")
-	}
-	
-	if verifier == challenge {
-		t.Error("Expected verifier and challenge to be different")
-	}
+	assert.NotEmpty(t, verifier, "Expected non-empty verifier")
+	assert.NotEmpty(t, challenge, "Expected non-empty challenge")
+	assert.NotEqual(t, verifier, challenge, "Expected verifier and challenge to be different")
 }
 
 func TestGetOAuth2Scopes(t *testing.T) {
 	scopes := getOAuth2Scopes()
 	
-	if len(scopes) == 0 {
-		t.Error("Expected non-empty scopes")
-	}
+	assert.NotEmpty(t, scopes, "Expected non-empty scopes")
 	
 	// Check for some common scopes
-	foundTweetRead := false
-	foundUsersRead := false
-	
-	for _, scope := range scopes {
-		if scope == "tweet.read" {
-			foundTweetRead = true
-		}
-		if scope == "users.read" {
-			foundUsersRead = true
-		}
-	}
-	
-	if !foundTweetRead {
-		t.Error("Expected 'tweet.read' scope")
-	}
-	
-	if !foundUsersRead {
-		t.Error("Expected 'users.read' scope")
-	}
+	assert.Contains(t, scopes, "tweet.read", "Expected 'tweet.read' scope")
+	assert.Contains(t, scopes, "users.read", "Expected 'users.read' scope")
 } 
