@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,14 +28,14 @@ func (m *MockApiClient) SendMultipartRequest(options MultipartOptions) (json.Raw
 	return args.Get(0).(json.RawMessage), args.Error(1)
 }
 
-func (m *MockApiClient) BuildRequest(requestOptions RequestOptions, body io.Reader, contentType string) (*http.Request, error) {
-	args := m.Called(requestOptions, body, contentType)
+func (m *MockApiClient) BuildRequest(requestOptions RequestOptions) (*http.Request, error) {
+	args := m.Called(requestOptions)
 	return args.Get(0).(*http.Request), args.Error(1)
 }
 
-func (m *MockApiClient) GetAuthHeader(method, endpoint string, authType string, username string) (string, error) {
-	args := m.Called(method, endpoint, authType, username)
-	return args.String(0), args.Error(1)
+func (m *MockApiClient) BuildMultipartRequest(options MultipartOptions) (*http.Request, error) {
+	args := m.Called(options)
+	return args.Get(0).(*http.Request), args.Error(1)
 }
 
 func (m *MockApiClient) StreamRequest(options RequestOptions) error {

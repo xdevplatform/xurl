@@ -44,8 +44,8 @@ type MultipartOptions struct {
 
 // Client is an interface for API clients
 type Client interface {
-	GetAuthHeader(method, url string, authType string, username string) (string, error)
-	BuildRequest(requestOptions RequestOptions, body io.Reader, contentType string) (*http.Request, error)
+	BuildRequest(requestOptions RequestOptions) (*http.Request, error)
+	BuildMultipartRequest(options MultipartOptions) (*http.Request, error)
 	SendRequest(options RequestOptions) (json.RawMessage, error)
 	StreamRequest(options RequestOptions) error
 	SendMultipartRequest(options MultipartOptions) (json.RawMessage, error)
@@ -67,184 +67,38 @@ func NewApiClient(config *config.Config, auth *auth.Auth) *ApiClient {
 	}
 }
 
-// GetAuthHeader gets the authorization header for a request
-func (c *ApiClient) GetAuthHeader(method, url string, authType string, username string) (string, error) {
-	if c.auth == nil {
-		return "", xurlErrors.NewAuthError("AuthNotSet", errors.New("auth not set"))
-	}
-
-	if authType != "" {
-		switch strings.ToLower(authType) {
-		case "oauth1":
-			return c.auth.GetOAuth1Header(method, url, nil)
-		case "oauth2":
-			return c.auth.GetOAuth2Header(username)
-		case "app":
-			return c.auth.GetBearerTokenHeader()
-		default:
-			return "", xurlErrors.NewAuthError("InvalidAuthType", fmt.Errorf("invalid auth type: %s", authType))
-		}
-	}
-
-	// If no auth type is specified, try to use the first OAuth2 token
-	token := c.auth.TokenStore.GetFirstOAuth2Token()
-	if token != nil {
-		accessToken, err := c.auth.GetOAuth2Header(username)
-		if err == nil {
-			return accessToken, nil
-		}
-	}
-
-	// If no OAuth2 token is available, try to use the first OAuth1 token
-	token = c.auth.TokenStore.GetOAuth1Tokens()
-	if token != nil {
-		authHeader, err := c.auth.GetOAuth1Header(method, url, nil)
-		if err == nil {
-			return authHeader, nil
-		}
-	}
-
-	// If no OAuth1 token is available, try to use the bearer token
-	bearerToken, err := c.auth.GetBearerTokenHeader()
-	if err == nil {
-		return bearerToken, nil
-	}
-
-	// If no authentication method is available, return an error
-	return "", xurlErrors.NewAuthError("NoAuthMethod", errors.New("no authentication method available"))
-}
-
 // BuildRequest builds an HTTP request
-func (c *ApiClient) BuildRequest(requestOptions RequestOptions, body io.Reader, contentType string) (*http.Request, error) {
+func (c *ApiClient) BuildRequest(requestOptions RequestOptions) (*http.Request, error) {
 	httpMethod := strings.ToUpper(requestOptions.Method)
 
-	url := requestOptions.Endpoint
-	if !strings.HasPrefix(strings.ToLower(requestOptions.Endpoint), "http") {
-		url = c.url
-		if !strings.HasSuffix(url, "/") {
-			url += "/"
-		}
-		if strings.HasPrefix(requestOptions.Endpoint, "/") {
-			url += requestOptions.Endpoint[1:]
-		} else {
-			url += requestOptions.Endpoint
-		}
-	}
-
-	req, err := http.NewRequest(httpMethod, url, body)
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
-
-	for _, header := range requestOptions.Headers {
-		parts := strings.SplitN(header, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Add(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-		}
-	}
-
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	if req.Header.Get("Authorization") == "" {
-		authHeader, err := c.GetAuthHeader(httpMethod, url, requestOptions.AuthType, requestOptions.Username)
-		if err == nil {
-			req.Header.Add("Authorization", authHeader)
-		}
-	}
-
-	req.Header.Add("User-Agent", "xurl/"+version.Version)
-
-	if requestOptions.Trace {
-		req.Header.Add("X-B3-Flags", "1")
-	}
-
-	return req, nil
-}
-
-// processResponse handles common response processing logic
-func (c *ApiClient) processResponse(resp *http.Response, verbose bool) (json.RawMessage, error) {
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, xurlErrors.NewIOError(err)
-	}
-
-	if verbose {
-		fmt.Printf("\033[1;31m< %s\033[0m\n", resp.Status)
-		for key, values := range resp.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;32m< %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-
-	var js json.RawMessage
-	if len(responseBody) > 0 {
-		if err := json.Unmarshal(responseBody, &js); err != nil {
-			if resp.StatusCode >= 400 {
-				return nil, xurlErrors.NewHTTPError(fmt.Errorf("HTTP error: %s", resp.Status))
-			}
-			js = json.RawMessage("{}")
-		}
-	} else {
-		js = json.RawMessage("{}")
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, xurlErrors.NewAPIError(js)
-	}
-
-	return js, nil
-}
-
-// logRequest logs request details if verbose mode is enabled
-func (c *ApiClient) logRequest(req *http.Request, verbose bool) {
-	if verbose {
-		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
-		for key, values := range req.Header {
-			for _, value := range values {
-				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
-			}
-		}
-		fmt.Println()
-	}
-}
-
-// SendRequest sends an HTTP request
-func (c *ApiClient) SendRequest(options RequestOptions) (json.RawMessage, error) {
 	var body io.Reader
 	contentType := ""
 
-	if options.Data != "" && (strings.ToUpper(options.Method) == "POST" || strings.ToUpper(options.Method) == "PUT" || strings.ToUpper(options.Method) == "PATCH") {
-		body = bytes.NewBufferString(options.Data)
+	if requestOptions.Data != "" && (httpMethod == "POST" || httpMethod == "PUT" || httpMethod == "PATCH") {
+		body = bytes.NewBufferString(requestOptions.Data)
 
 		var js json.RawMessage
-		if json.Unmarshal([]byte(options.Data), &js) == nil {
+		if json.Unmarshal([]byte(requestOptions.Data), &js) == nil {
 			contentType = "application/json"
+		} else {
+			contentType = "application/x-www-form-urlencoded"
 		}
 	}
 
-	req, err := c.BuildRequest(options, body, contentType)
-
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
-
-	c.logRequest(req, options.Verbose)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
-	}
-	defer resp.Body.Close()
-
-	return c.processResponse(resp, options.Verbose)
+	return c.buildBaseRequest(
+		requestOptions.Method,
+		requestOptions.Endpoint,
+		body,
+		contentType,
+		requestOptions.Headers,
+		requestOptions.AuthType,
+		requestOptions.Username,
+		requestOptions.Trace,
+	)
 }
 
-// SendMultipartRequest sends an HTTP request with multipart form data
-func (c *ApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMessage, error) {
+// BuildMultipartRequest builds an HTTP request with multipart form data
+func (c *ApiClient) BuildMultipartRequest(options MultipartOptions) (*http.Request, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
@@ -285,7 +139,22 @@ func (c *ApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMess
 		return nil, xurlErrors.NewIOError(fmt.Errorf("error closing multipart writer: %v", err))
 	}
 
-	req, err := c.BuildRequest(options.RequestOptions, body, writer.FormDataContentType())
+	// Use the common base request builder with the multipart content type
+	return c.buildBaseRequest(
+		options.Method,
+		options.Endpoint,
+		body,
+		writer.FormDataContentType(),
+		options.Headers,
+		options.AuthType,
+		options.Username,
+		options.Trace,
+	)
+}
+
+// SendRequest sends an HTTP request
+func (c *ApiClient) SendRequest(options RequestOptions) (json.RawMessage, error) {
+	req, err := c.BuildRequest(options)
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
 	}
@@ -301,23 +170,27 @@ func (c *ApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMess
 	return c.processResponse(resp, options.Verbose)
 }
 
-// StreamRequest sends an HTTP request and streams the response
-func (c *ApiClient) StreamRequest(options RequestOptions) error {
-	var body io.Reader
-	contentType := ""
-
-	if options.Data != "" && (strings.ToUpper(options.Method) == "POST" || strings.ToUpper(options.Method) == "PUT" || strings.ToUpper(options.Method) == "PATCH") {
-		body = bytes.NewBufferString(options.Data)
-
-		var js json.RawMessage
-		if json.Unmarshal([]byte(options.Data), &js) == nil {
-			contentType = "application/json"
-		} else {
-			contentType = "application/x-www-form-urlencoded"
-		}
+// SendMultipartRequest sends an HTTP request with multipart form data
+func (c *ApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMessage, error) {
+	req, err := c.BuildMultipartRequest(options)
+	if err != nil {
+		return nil, err
 	}
 
-	req, err := c.BuildRequest(options, body, contentType)
+	c.logRequest(req, options.Verbose)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, xurlErrors.NewHTTPError(err)
+	}
+	defer resp.Body.Close()
+
+	return c.processResponse(resp, options.Verbose)
+}
+
+// StreamRequest sends an HTTP request and streams the response
+func (c *ApiClient) StreamRequest(options RequestOptions) error {
+	req, err := c.BuildRequest(options)
 	if err != nil {
 		return xurlErrors.NewHTTPError(err)
 	}
@@ -396,4 +269,155 @@ func (c *ApiClient) StreamRequest(options RequestOptions) error {
 
 	fmt.Println("\033[1;32m--- End of stream ---\033[0m")
 	return nil
+}
+
+// buildBaseRequest creates the base HTTP request with common headers and settings
+func (c *ApiClient) buildBaseRequest(method, endpoint string, body io.Reader, contentType string, headers []string, authType, username string, trace bool) (*http.Request, error) {
+	httpMethod := strings.ToUpper(method)
+
+	// Build the full URL
+	url := endpoint
+	if !strings.HasPrefix(strings.ToLower(endpoint), "http") {
+		url = c.url
+		if !strings.HasSuffix(url, "/") {
+			url += "/"
+		}
+		if strings.HasPrefix(endpoint, "/") {
+			url += endpoint[1:]
+		} else {
+			url += endpoint
+		}
+	}
+
+	// Create the request
+	req, err := http.NewRequest(httpMethod, url, body)
+	if err != nil {
+		return nil, xurlErrors.NewHTTPError(err)
+	}
+
+	// Add headers
+	for _, header := range headers {
+		parts := strings.SplitN(header, ":", 2)
+		if len(parts) == 2 {
+			req.Header.Add(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
+	}
+
+	// Set content type if provided
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	// Add authorization header if not already set
+	if req.Header.Get("Authorization") == "" {
+		authHeader, err := c.getAuthHeader(httpMethod, url, authType, username)
+		if err == nil {
+			req.Header.Add("Authorization", authHeader)
+		}
+	}
+
+	// Add common headers
+	req.Header.Add("User-Agent", "xurl/"+version.Version)
+
+	if trace {
+		req.Header.Add("X-B3-Flags", "1")
+	}
+
+	return req, nil
+}
+
+// GetAuthHeader gets the authorization header for a request
+func (c *ApiClient) getAuthHeader(method, url string, authType string, username string) (string, error) {
+	if c.auth == nil {
+		return "", xurlErrors.NewAuthError("AuthNotSet", errors.New("auth not set"))
+	}
+
+	if authType != "" {
+		switch strings.ToLower(authType) {
+		case "oauth1":
+			return c.auth.GetOAuth1Header(method, url, nil)
+		case "oauth2":
+			return c.auth.GetOAuth2Header(username)
+		case "app":
+			return c.auth.GetBearerTokenHeader()
+		default:
+			return "", xurlErrors.NewAuthError("InvalidAuthType", fmt.Errorf("invalid auth type: %s", authType))
+		}
+	}
+
+	// If no auth type is specified, try to use the first OAuth2 token
+	token := c.auth.TokenStore.GetFirstOAuth2Token()
+	if token != nil {
+		accessToken, err := c.auth.GetOAuth2Header(username)
+		if err == nil {
+			return accessToken, nil
+		}
+	}
+
+	// If no OAuth2 token is available, try to use the first OAuth1 token
+	token = c.auth.TokenStore.GetOAuth1Tokens()
+	if token != nil {
+		authHeader, err := c.auth.GetOAuth1Header(method, url, nil)
+		if err == nil {
+			return authHeader, nil
+		}
+	}
+
+	// If no OAuth1 token is available, try to use the bearer token
+	bearerToken, err := c.auth.GetBearerTokenHeader()
+	if err == nil {
+		return bearerToken, nil
+	}
+
+	// If no authentication method is available, return an error
+	return "", xurlErrors.NewAuthError("NoAuthMethod", errors.New("no authentication method available"))
+}
+
+// logRequest logs request details if verbose mode is enabled
+func (c *ApiClient) logRequest(req *http.Request, verbose bool) {
+	if verbose {
+		fmt.Printf("\033[1;34m> %s\033[0m %s\n", req.Method, req.URL)
+		for key, values := range req.Header {
+			for _, value := range values {
+				fmt.Printf("\033[1;36m> %s\033[0m: %s\n", key, value)
+			}
+		}
+		fmt.Println()
+	}
+}
+
+// processResponse handles common response processing logic
+func (c *ApiClient) processResponse(resp *http.Response, verbose bool) (json.RawMessage, error) {
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, xurlErrors.NewIOError(err)
+	}
+
+	if verbose {
+		fmt.Printf("\033[1;31m< %s\033[0m\n", resp.Status)
+		for key, values := range resp.Header {
+			for _, value := range values {
+				fmt.Printf("\033[1;32m< %s\033[0m: %s\n", key, value)
+			}
+		}
+		fmt.Println()
+	}
+
+	var js json.RawMessage
+	if len(responseBody) > 0 {
+		if err := json.Unmarshal(responseBody, &js); err != nil {
+			if resp.StatusCode >= 400 {
+				return nil, xurlErrors.NewHTTPError(fmt.Errorf("HTTP error: %s", resp.Status))
+			}
+			js = json.RawMessage("{}")
+		}
+	} else {
+		js = json.RawMessage("{}")
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, xurlErrors.NewAPIError(js)
+	}
+
+	return js, nil
 }

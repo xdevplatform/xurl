@@ -1,9 +1,7 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -136,28 +134,16 @@ func TestBuildRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var body io.Reader
-			contentType := ""
-			if tt.data != "" && (strings.ToUpper(tt.method) == "POST" || strings.ToUpper(tt.method) == "PUT" || strings.ToUpper(tt.method) == "PATCH") {
-				body = bytes.NewBufferString(tt.data)
-
-				var js json.RawMessage
-				if json.Unmarshal([]byte(tt.data), &js) == nil {
-					contentType = "application/json"
-				} else {
-					contentType = "application/x-www-form-urlencoded"
-				}
-			}
-
 			requestOptions := RequestOptions{
 				Method:   tt.method,
 				Endpoint: tt.endpoint,
 				Headers:  tt.headers,
 				AuthType: tt.authType,
 				Username: tt.username,
+				Data:     tt.data,
 			}
 
-			req, err := client.BuildRequest(requestOptions, body, contentType)
+			req, err := client.BuildRequest(requestOptions)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -237,11 +223,11 @@ func TestSendRequest(t *testing.T) {
 
 		require.NoError(t, err)
 
-		var result map[string]interface{}
+		var result map[string]any
 		err = json.Unmarshal(resp, &result)
 		require.NoError(t, err, "Failed to parse response")
 
-		data, ok := result["data"].(map[string]interface{})
+		data, ok := result["data"].(map[string]any)
 		require.True(t, ok, "Expected data object in response")
 
 		assert.Equal(t, "testuser", data["username"], "Username should match")
@@ -263,11 +249,11 @@ func TestSendRequest(t *testing.T) {
 
 		require.NoError(t, err)
 
-		var result map[string]interface{}
+		var result map[string]any
 		err = json.Unmarshal(resp, &result)
 		require.NoError(t, err, "Failed to parse response")
 
-		data, ok := result["data"].(map[string]interface{})
+		data, ok := result["data"].(map[string]any)
 		require.True(t, ok, "Expected data object in response")
 
 		assert.Equal(t, "Hello world!", data["text"], "Tweet text should match")
@@ -300,7 +286,7 @@ func TestGetAuthHeader(t *testing.T) {
 	t.Run("No auth set", func(t *testing.T) {
 		client := NewApiClient(cfg, nil)
 
-		_, err := client.GetAuthHeader("GET", "https://api.x.com/2/users/me", "", "")
+		_, err := client.getAuthHeader("GET", "https://api.x.com/2/users/me", "", "")
 
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
@@ -311,7 +297,7 @@ func TestGetAuthHeader(t *testing.T) {
 		defer os.RemoveAll(tempDir)
 		client := NewApiClient(cfg, authMock)
 
-		_, err := client.GetAuthHeader("GET", "https://api.x.com/2/users/me", "invalid", "")
+		_, err := client.getAuthHeader("GET", "https://api.x.com/2/users/me", "invalid", "")
 
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
