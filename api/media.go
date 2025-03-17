@@ -385,13 +385,13 @@ func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, 
 }
 
 // HandleMediaAppendRequest handles a media append request with a file
-func HandleMediaAppendRequest(url, mediaFile, method string, headers []string, data, authType, username string, verbose bool, client Client) (json.RawMessage, error) {
-	mediaID := ExtractMediaID(url, data)
+func HandleMediaAppendRequest(options RequestOptions, mediaFile string, client Client) (json.RawMessage, error) {
+	mediaID := ExtractMediaID(options.Endpoint, options.Data)
 	if mediaID == "" {
 		return nil, fmt.Errorf("media_id is required for APPEND command")
 	}
 
-	segmentIndex := ExtractSegmentIndex(url, data)
+	segmentIndex := ExtractSegmentIndex(options.Endpoint, options.Data)
 	if segmentIndex == "" {
 		segmentIndex = "0"
 	}
@@ -402,17 +402,8 @@ func HandleMediaAppendRequest(url, mediaFile, method string, headers []string, d
 		"segment_index": segmentIndex,
 	}
 
-	requestOptions := RequestOptions{
-		Method:   method,
-		Endpoint: url,
-		Headers:  headers,
-		Data:     data,
-		AuthType: authType,
-		Username: username,
-		Verbose:  verbose,
-	}
 	multipartOptions := MultipartOptions{
-		RequestOptions: requestOptions,
+		RequestOptions: options,
 		FormFields:     formFields,
 		FileField:      "media",
 		FilePath:       mediaFile,

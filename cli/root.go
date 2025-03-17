@@ -42,6 +42,7 @@ Examples:
 			authType, _ := cmd.Flags().GetString("auth")
 			username, _ := cmd.Flags().GetString("username")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			trace, _ := cmd.Flags().GetBool("trace")
 			forceStream, _ := cmd.Flags().GetBool("stream")
 			mediaFile, _ := cmd.Flags().GetString("file")
 
@@ -56,7 +57,17 @@ Examples:
 
 			client := api.NewApiClient(config, auth)
 
-			err := api.HandleRequest(method, url, headers, data, authType, username, verbose, forceStream, mediaFile, client)
+			requestOptions := api.RequestOptions{
+				Method:   method,
+				Endpoint: url,
+				Headers:  headers,
+				Data:     data,
+				AuthType: authType,
+				Username: username,
+				Verbose:  verbose,
+				Trace:    trace,
+			}
+			err := api.HandleRequest(requestOptions, forceStream, mediaFile, client)
 			if err != nil {
 				fmt.Printf("\033[31mError: %v\033[0m\n", err)
 				os.Exit(1)

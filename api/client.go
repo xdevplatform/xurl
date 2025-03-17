@@ -29,6 +29,7 @@ type RequestOptions struct {
 	AuthType string
 	Username string
 	Verbose  bool
+	Trace    bool
 }
 
 // MultipartOptions contains options specific to multipart requests
@@ -44,7 +45,7 @@ type MultipartOptions struct {
 // Client is an interface for API clients
 type Client interface {
 	GetAuthHeader(method, url string, authType string, username string) (string, error)
-	BuildRequest(method, endpoint string, headers []string, body io.Reader, contentType string, authType string, username string) (*http.Request, error)
+	BuildRequest(requestOptions RequestOptions, body io.Reader, contentType string) (*http.Request, error)
 	SendRequest(options RequestOptions) (json.RawMessage, error)
 	StreamRequest(options RequestOptions) error
 	SendMultipartRequest(options MultipartOptions) (json.RawMessage, error)
@@ -114,19 +115,19 @@ func (c *ApiClient) GetAuthHeader(method, url string, authType string, username 
 }
 
 // BuildRequest builds an HTTP request
-func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, body io.Reader, contentType string, authType string, username string) (*http.Request, error) {
-	httpMethod := strings.ToUpper(method)
+func (c *ApiClient) BuildRequest(requestOptions RequestOptions, body io.Reader, contentType string) (*http.Request, error) {
+	httpMethod := strings.ToUpper(requestOptions.Method)
 
-	url := endpoint
-	if !strings.HasPrefix(strings.ToLower(endpoint), "http") {
+	url := requestOptions.Endpoint
+	if !strings.HasPrefix(strings.ToLower(requestOptions.Endpoint), "http") {
 		url = c.url
 		if !strings.HasSuffix(url, "/") {
 			url += "/"
 		}
-		if strings.HasPrefix(endpoint, "/") {
-			url += endpoint[1:]
+		if strings.HasPrefix(requestOptions.Endpoint, "/") {
+			url += requestOptions.Endpoint[1:]
 		} else {
-			url += endpoint
+			url += requestOptions.Endpoint
 		}
 	}
 
@@ -135,7 +136,7 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, body
 		return nil, xurlErrors.NewHTTPError(err)
 	}
 
-	for _, header := range headers {
+	for _, header := range requestOptions.Headers {
 		parts := strings.SplitN(header, ":", 2)
 		if len(parts) == 2 {
 			req.Header.Add(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
@@ -147,13 +148,17 @@ func (c *ApiClient) BuildRequest(method, endpoint string, headers []string, body
 	}
 
 	if req.Header.Get("Authorization") == "" {
-		authHeader, err := c.GetAuthHeader(httpMethod, url, authType, username)
+		authHeader, err := c.GetAuthHeader(httpMethod, url, requestOptions.AuthType, requestOptions.Username)
 		if err == nil {
 			req.Header.Add("Authorization", authHeader)
 		}
 	}
 
 	req.Header.Add("User-Agent", "xurl/"+version.Version)
+
+	if requestOptions.Trace {
+		req.Header.Add("X-B3-Flags", "1")
+	}
 
 	return req, nil
 }
@@ -221,7 +226,7 @@ func (c *ApiClient) SendRequest(options RequestOptions) (json.RawMessage, error)
 		}
 	}
 
-	req, err := c.BuildRequest(options.Method, options.Endpoint, options.Headers, body, contentType, options.AuthType, options.Username)
+	req, err := c.BuildRequest(options, body, contentType)
 
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
@@ -280,7 +285,7 @@ func (c *ApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMess
 		return nil, xurlErrors.NewIOError(fmt.Errorf("error closing multipart writer: %v", err))
 	}
 
-	req, err := c.BuildRequest(options.Method, options.Endpoint, options.Headers, body, writer.FormDataContentType(), options.AuthType, options.Username)
+	req, err := c.BuildRequest(options.RequestOptions, body, writer.FormDataContentType())
 	if err != nil {
 		return nil, xurlErrors.NewHTTPError(err)
 	}
@@ -312,7 +317,7 @@ func (c *ApiClient) StreamRequest(options RequestOptions) error {
 		}
 	}
 
-	req, err := c.BuildRequest(options.Method, options.Endpoint, options.Headers, body, contentType, options.AuthType, options.Username)
+	req, err := c.BuildRequest(options, body, contentType)
 	if err != nil {
 		return xurlErrors.NewHTTPError(err)
 	}

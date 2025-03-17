@@ -29,8 +29,8 @@ func (m *MockApiClient) SendMultipartRequest(options MultipartOptions) (json.Raw
 	return args.Get(0).(json.RawMessage), args.Error(1)
 }
 
-func (m *MockApiClient) BuildRequest(method, endpoint string, headers []string, data io.Reader, contentType string, authType string, username string) (*http.Request, error) {
-	args := m.Called(method, endpoint, headers, data, contentType, authType, username)
+func (m *MockApiClient) BuildRequest(requestOptions RequestOptions, body io.Reader, contentType string) (*http.Request, error) {
+	args := m.Called(requestOptions, body, contentType)
 	return args.Get(0).(*http.Request), args.Error(1)
 }
 
@@ -563,16 +563,17 @@ func TestHandleMediaAppendRequest(t *testing.T) {
 	}
 	mockClient.On("SendMultipartRequest", multipartOptions).Return(mockResponse, nil).Twice()
 
-	response, err := HandleMediaAppendRequest(url, tempFile, "POST", []string{}, "", "oauth2", "testuser", false, mockClient)
+	response, err := HandleMediaAppendRequest(requestOptions, tempFile, mockClient)
 	assert.NoError(t, err)
 	assert.Equal(t, mockResponse, response)
 
-	response, err = HandleMediaAppendRequest(url, tempFile, "POST", []string{}, "", "oauth2", "testuser", false, mockClient)
+	response, err = HandleMediaAppendRequest(requestOptions, tempFile, mockClient)
 	assert.NoError(t, err)
 	assert.Equal(t, mockResponse, response)
 
-	url = "/2/media/upload?command=APPEND"
-	response, err = HandleMediaAppendRequest(url, tempFile, "POST", []string{}, "", "oauth2", "testuser", false, mockClient)
+	requestOptionsNoMediaID := requestOptions
+	requestOptionsNoMediaID.Endpoint = "/2/media/upload?command=APPEND"
+	response, err = HandleMediaAppendRequest(requestOptionsNoMediaID, tempFile, mockClient)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "media_id is required")
 	assert.Nil(t, response)

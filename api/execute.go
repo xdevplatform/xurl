@@ -7,16 +7,7 @@ import (
 )
 
 // ExecuteRequest handles the execution of a regular API request
-func ExecuteRequest(method, url string, headers []string, data, authType, username string, verbose bool, client Client) error {
-	options := RequestOptions{
-		Method:   method,
-		Endpoint: url,
-		Headers:  headers,
-		Data:     data,
-		AuthType: authType,
-		Username: username,
-		Verbose:  verbose,
-	}
+func ExecuteRequest(options RequestOptions, client Client) error {
 
 	response, clientErr := client.SendRequest(options)
 	if clientErr != nil {
@@ -27,16 +18,7 @@ func ExecuteRequest(method, url string, headers []string, data, authType, userna
 }
 
 // ExecuteStreamRequest handles the execution of a streaming API request
-func ExecuteStreamRequest(method, url string, headers []string, data, authType, username string, verbose bool, client Client) error {
-	options := RequestOptions{
-		Method:   method,
-		Endpoint: url,
-		Headers:  headers,
-		Data:     data,
-		AuthType: authType,
-		Username: username,
-		Verbose:  verbose,
-	}
+func ExecuteStreamRequest(options RequestOptions, client Client) error {
 
 	clientErr := client.StreamRequest(options)
 	if clientErr != nil {
@@ -57,9 +39,9 @@ func handleRequestError(clientErr error) error {
 // formatAndPrintResponse formats and prints API responses
 
 // HandleRequest determines the type of request and executes it accordingly
-func HandleRequest(method, url string, headers []string, data, authType, username string, verbose, forceStream bool, mediaFile string, client Client) error {
-	if IsMediaAppendRequest(url, mediaFile) {
-		response, err := HandleMediaAppendRequest(url, mediaFile, method, headers, data, authType, username, verbose, client)
+func HandleRequest(options RequestOptions, forceStream bool, mediaFile string, client Client) error {
+	if IsMediaAppendRequest(options.Endpoint, mediaFile) {
+		response, err := HandleMediaAppendRequest(options, mediaFile, client)
 		if err != nil {
 			return err
 		}
@@ -67,11 +49,11 @@ func HandleRequest(method, url string, headers []string, data, authType, usernam
 		return utils.FormatAndPrintResponse(response)
 	}
 
-	shouldStream := forceStream || IsStreamingEndpoint(url)
+	shouldStream := forceStream || IsStreamingEndpoint(options.Endpoint)
 
 	if shouldStream {
-		return ExecuteStreamRequest(method, url, headers, data, authType, username, verbose, client)
+		return ExecuteStreamRequest(options, client)
 	} else {
-		return ExecuteRequest(method, url, headers, data, authType, username, verbose, client)
+		return ExecuteRequest(options, client)
 	}
 }

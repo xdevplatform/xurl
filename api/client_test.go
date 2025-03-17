@@ -149,7 +149,15 @@ func TestBuildRequest(t *testing.T) {
 				}
 			}
 
-			req, err := client.BuildRequest(tt.method, tt.endpoint, tt.headers, body, contentType, tt.authType, tt.username)
+			requestOptions := RequestOptions{
+				Method:   tt.method,
+				Endpoint: tt.endpoint,
+				Headers:  tt.headers,
+				AuthType: tt.authType,
+				Username: tt.username,
+			}
+
+			req, err := client.BuildRequest(requestOptions, body, contentType)
 
 			if tt.wantErr {
 				assert.Error(t, err)
