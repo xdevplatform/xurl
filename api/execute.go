@@ -8,7 +8,17 @@ import (
 
 // ExecuteRequest handles the execution of a regular API request
 func ExecuteRequest(method, url string, headers []string, data, authType, username string, verbose bool, client Client) error {
-	response, clientErr := client.SendRequest(method, url, headers, data, authType, username, verbose)
+	options := RequestOptions{
+		Method:   method,
+		Endpoint: url,
+		Headers:  headers,
+		Data:     data,
+		AuthType: authType,
+		Username: username,
+		Verbose:  verbose,
+	}
+
+	response, clientErr := client.SendRequest(options)
 	if clientErr != nil {
 		return handleRequestError(clientErr)
 	}
@@ -18,11 +28,21 @@ func ExecuteRequest(method, url string, headers []string, data, authType, userna
 
 // ExecuteStreamRequest handles the execution of a streaming API request
 func ExecuteStreamRequest(method, url string, headers []string, data, authType, username string, verbose bool, client Client) error {
-	clientErr := client.StreamRequest(method, url, headers, data, authType, username, verbose)
+	options := RequestOptions{
+		Method:   method,
+		Endpoint: url,
+		Headers:  headers,
+		Data:     data,
+		AuthType: authType,
+		Username: username,
+		Verbose:  verbose,
+	}
+
+	clientErr := client.StreamRequest(options)
 	if clientErr != nil {
 		return handleRequestError(clientErr)
 	}
-	
+
 	return nil
 }
 
@@ -43,10 +63,10 @@ func HandleRequest(method, url string, headers []string, data, authType, usernam
 		if err != nil {
 			return err
 		}
-		
+
 		return utils.FormatAndPrintResponse(response)
 	}
-	
+
 	shouldStream := forceStream || IsStreamingEndpoint(url)
 
 	if shouldStream {
@@ -54,4 +74,4 @@ func HandleRequest(method, url string, headers []string, data, authType, usernam
 	} else {
 		return ExecuteRequest(method, url, headers, data, authType, username, verbose, client)
 	}
-} 
+}

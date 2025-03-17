@@ -53,4 +53,4 @@ func StartListener(port int, callback func(code, state string) error) error {
 		server.Shutdown(context.Background())
 		return xurlErrors.NewAuthError("Timeout", errors.New("timeout waiting for callback"))
 	}
-} 
+}

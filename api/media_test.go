@@ -19,18 +19,13 @@ type MockApiClient struct {
 	mock.Mock
 }
 
-func (m *MockApiClient) SendRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) (json.RawMessage, error) {
-	args := m.Called(method, endpoint, headers, data, authType, username, verbose)
+func (m *MockApiClient) SendRequest(options RequestOptions) (json.RawMessage, error) {
+	args := m.Called(options)
 	return args.Get(0).(json.RawMessage), args.Error(1)
 }
 
-func (m *MockApiClient) SendMultipartRequestWithBuffer(method, endpoint string, headers []string, formFields map[string]string, fileField, fileName string, fileData []byte, authType string, username string, verbose bool) (json.RawMessage, error) {
-	args := m.Called(method, endpoint, headers, formFields, fileField, fileName, fileData, authType, username, verbose)
-	return args.Get(0).(json.RawMessage), args.Error(1)
-}
-
-func (m *MockApiClient) SendMultipartRequest(method, endpoint string, headers []string, formFields map[string]string, fileField, filePath string, authType string, username string, verbose bool) (json.RawMessage, error) {
-	args := m.Called(method, endpoint, headers, formFields, fileField, filePath, authType, username, verbose)
+func (m *MockApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMessage, error) {
+	args := m.Called(options)
 	return args.Get(0).(json.RawMessage), args.Error(1)
 }
 
@@ -44,40 +39,40 @@ func (m *MockApiClient) GetAuthHeader(method, endpoint string, authType string, 
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockApiClient) StreamRequest(method, endpoint string, headers []string, data string, authType string, username string, verbose bool) error {
-	args := m.Called(method, endpoint, headers, data, authType, username, verbose)
+func (m *MockApiClient) StreamRequest(options RequestOptions) error {
+	args := m.Called(options.Method, options.Endpoint, options.Headers, options.Data, options.AuthType, options.Username, options.Verbose)
 	return args.Error(0)
 }
 
 // Helper function to create a temporary test file
-func createTempTestFile(t *testing.T, size int) string {
+func createTempTestFile(t *testing.T, size int) (string, []byte) {
 	tempFile, err := os.CreateTemp("", "media_test_*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	
+
 	data := make([]byte, size)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
-	
+
 	if _, err := tempFile.Write(data); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
 	}
-	
+
 	if err := tempFile.Close(); err != nil {
 		t.Fatalf("Failed to close temp file: %v", err)
 	}
-	
-	return tempFile.Name()
+
+	return tempFile.Name(), data
 }
 
 func TestNewMediaUploader(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	uploader, err := NewMediaUploader(mockClient, tempFile, true, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
 	assert.NotNil(t, uploader)
@@ -86,17 +81,17 @@ func TestNewMediaUploader(t *testing.T) {
 	assert.Equal(t, true, uploader.verbose)
 	assert.Equal(t, "oauth2", uploader.authType)
 	assert.Equal(t, "testuser", uploader.username)
-	
+
 	uploader, err = NewMediaUploader(mockClient, "nonexistent.txt", false, "oauth2", "testuser", []string{})
 	assert.Error(t, err)
 	assert.Nil(t, uploader)
-	
+
 	tempDir, err := os.MkdirTemp("", "media_test_dir")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
-	
+
 	uploader, err = NewMediaUploader(mockClient, tempDir, false, "oauth2", "testuser", []string{})
 	assert.Error(t, err)
 	assert.Nil(t, uploader)
@@ -104,13 +99,13 @@ func TestNewMediaUploader(t *testing.T) {
 
 func TestMediaUploader_Init(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	uploader, err := NewMediaUploader(mockClient, tempFile, false, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
-	
+
 	initResponse := json.RawMessage(`{
 		"data": {
 			"id": "test_media_id",
@@ -118,73 +113,86 @@ func TestMediaUploader_Init(t *testing.T) {
 			"media_key": "test_media_key"
 		}
 	}`)
-	
+
 	expectedUrl := MediaEndpoint + "?command=INIT&total_bytes=1024&media_type=image/jpeg&media_category=tweet_image"
-	mockClient.On("SendRequest", "POST", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(initResponse, nil)
-	
+	requestOptions := RequestOptions{
+		Method:   "POST",
+		Endpoint: expectedUrl,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+
+	mockClient.On("SendRequest", requestOptions).Return(initResponse, nil)
+
 	err = uploader.Init("image/jpeg", "tweet_image")
 	assert.NoError(t, err)
 	assert.Equal(t, "test_media_id", uploader.GetMediaID())
-	
+
 	mockClient.AssertExpectations(t)
-	
+
 	mockClient = new(MockApiClient)
 	uploader, err = NewMediaUploader(mockClient, tempFile, false, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
-	
-	mockClient.On("SendRequest", "POST", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(json.RawMessage("{}"), assert.AnError)
-	
+
+	mockClient.On("SendRequest", requestOptions).Return(json.RawMessage("{}"), assert.AnError)
+
 	err = uploader.Init("image/jpeg", "tweet_image")
 	assert.Error(t, err)
-	
+
 	mockClient.AssertExpectations(t)
 }
 
 func TestMediaUploader_Append(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
+
 	fileSize := 8 * 1024 * 1024
-	tempFile := createTempTestFile(t, fileSize)
+	tempFile, data := createTempTestFile(t, fileSize)
 	defer os.Remove(tempFile)
-	
+
 	uploader, err := NewMediaUploader(mockClient, tempFile, false, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
-	
+
 	uploader.SetMediaID("test_media_id")
-	
-	mockClient.On(
-		"SendMultipartRequestWithBuffer",
-		"POST",
-		MediaEndpoint,
-		[]string{},
-		map[string]string{"command": "APPEND", "media_id": "test_media_id", "segment_index": "0"},
-		"media",
-		filepath.Base(tempFile),
-		mock.Anything,
-		"oauth2",
-		"testuser",
-		false,
-	).Return(json.RawMessage("{}"), nil)
-	
-	mockClient.On(
-		"SendMultipartRequestWithBuffer",
-		"POST",
-		MediaEndpoint,
-		[]string{},
-		map[string]string{"command": "APPEND", "media_id": "test_media_id", "segment_index": "1"},
-		"media",
-		filepath.Base(tempFile),
-		mock.Anything,
-		"oauth2",
-		"testuser",
-		false,
-	).Return(json.RawMessage("{}"), nil)
-	
+
+	requestOptions := RequestOptions{
+		Method:   "POST",
+		Endpoint: MediaEndpoint,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+
+	multipartOptions := MultipartOptions{
+		RequestOptions: requestOptions,
+		FormFields:     map[string]string{"command": "APPEND", "media_id": "test_media_id", "segment_index": "0"},
+		FileField:      "media",
+		FilePath:       tempFile,
+		FileName:       filepath.Base(tempFile),
+		FileData:       data[:4*1024*1024],
+	}
+
+	multipartOptions1 := MultipartOptions{
+		RequestOptions: requestOptions,
+		FormFields:     map[string]string{"command": "APPEND", "media_id": "test_media_id", "segment_index": "1"},
+		FileField:      "media",
+		FilePath:       tempFile,
+		FileName:       filepath.Base(tempFile),
+		FileData:       data[4*1024*1024:],
+	}
+
+	mockClient.On("SendMultipartRequest", multipartOptions).Return(json.RawMessage("{}"), nil)
+	mockClient.On("SendMultipartRequest", multipartOptions1).Return(json.RawMessage("{}"), nil)
+
 	err = uploader.Append()
 	assert.NoError(t, err)
-	
+
 	mockClient.AssertExpectations(t)
-	
+
 	uploader.SetMediaID("")
 	err = uploader.Append()
 	assert.Error(t, err)
@@ -193,31 +201,41 @@ func TestMediaUploader_Append(t *testing.T) {
 
 func TestMediaUploader_Finalize(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	uploader, err := NewMediaUploader(mockClient, tempFile, false, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
-	
+
 	uploader.SetMediaID("test_media_id")
-	
+
 	finalizeResponse := json.RawMessage(`{
 		"data": {
 			"id": "test_media_id",
 			"media_key": "test_media_key"
 		}
 	}`)
-	
+
 	expectedUrl := MediaEndpoint + "?command=FINALIZE&media_id=test_media_id"
-	mockClient.On("SendRequest", "POST", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(finalizeResponse, nil)
-	
+	requestOptions := RequestOptions{
+		Method:   "POST",
+		Endpoint: expectedUrl,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+
+	mockClient.On("SendRequest", requestOptions).Return(finalizeResponse, nil)
+
 	response, err := uploader.Finalize()
 	assert.NoError(t, err)
 	assert.Equal(t, finalizeResponse, response)
-	
+
 	mockClient.AssertExpectations(t)
-	
+
 	uploader.SetMediaID("")
 	response, err = uploader.Finalize()
 	assert.Error(t, err)
@@ -227,15 +245,15 @@ func TestMediaUploader_Finalize(t *testing.T) {
 
 func TestMediaUploader_CheckStatus(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	uploader, err := NewMediaUploader(mockClient, tempFile, false, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
-	
+
 	uploader.SetMediaID("test_media_id")
-	
+
 	statusResponse := json.RawMessage(`{
 		"data": {
 			"id": "test_media_id",
@@ -246,16 +264,26 @@ func TestMediaUploader_CheckStatus(t *testing.T) {
 			}
 		}
 	}`)
-	
+
 	expectedUrl := MediaEndpoint + "?command=STATUS&media_id=test_media_id"
-	mockClient.On("SendRequest", "GET", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(statusResponse, nil)
-	
+	requestOptions := RequestOptions{
+		Method:   "GET",
+		Endpoint: expectedUrl,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+
+	mockClient.On("SendRequest", requestOptions).Return(statusResponse, nil)
+
 	response, err := uploader.CheckStatus()
 	assert.NoError(t, err)
 	assert.Equal(t, statusResponse, response)
-	
+
 	mockClient.AssertExpectations(t)
-	
+
 	uploader.SetMediaID("")
 	response, err = uploader.CheckStatus()
 	assert.Error(t, err)
@@ -265,15 +293,15 @@ func TestMediaUploader_CheckStatus(t *testing.T) {
 
 func TestMediaUploader_WaitForProcessing(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	uploader, err := NewMediaUploader(mockClient, tempFile, false, "oauth2", "testuser", []string{})
 	assert.NoError(t, err)
-	
+
 	uploader.SetMediaID("test_media_id")
-	
+
 	inProgressResponse := json.RawMessage(`{
 		"data": {
 			"id": "test_media_id",
@@ -285,7 +313,7 @@ func TestMediaUploader_WaitForProcessing(t *testing.T) {
 			}
 		}
 	}`)
-	
+
 	successResponse := json.RawMessage(`{
 		"data": {
 			"id": "test_media_id",
@@ -296,18 +324,28 @@ func TestMediaUploader_WaitForProcessing(t *testing.T) {
 			}
 		}
 	}`)
-	
+
 	expectedUrl := MediaEndpoint + "?command=STATUS&media_id=test_media_id"
-	
-	mockClient.On("SendRequest", "GET", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(inProgressResponse, nil).Once()
-	mockClient.On("SendRequest", "GET", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(successResponse, nil).Once()
-	
+
+	requestOptions := RequestOptions{
+		Method:   "GET",
+		Endpoint: expectedUrl,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+
+	mockClient.On("SendRequest", requestOptions).Return(inProgressResponse, nil).Once()
+	mockClient.On("SendRequest", requestOptions).Return(successResponse, nil).Once()
+
 	response, err := uploader.WaitForProcessing()
 	assert.NoError(t, err)
 	assert.Equal(t, successResponse, response)
-	
+
 	mockClient.AssertExpectations(t)
-	
+
 	failedResponse := json.RawMessage(`{
 		"data": {
 			"id": "test_media_id",
@@ -318,14 +356,24 @@ func TestMediaUploader_WaitForProcessing(t *testing.T) {
 			}
 		}
 	}`)
-	
-	mockClient.On("SendRequest", "GET", expectedUrl, []string{}, "", "oauth2", "testuser", false).Return(failedResponse, nil).Once()
-	
+
+	requestOptions = RequestOptions{
+		Method:   "GET",
+		Endpoint: expectedUrl,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+
+	mockClient.On("SendRequest", requestOptions).Return(failedResponse, nil).Once()
+
 	response, err = uploader.WaitForProcessing()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "media processing failed")
 	assert.Nil(t, response)
-	
+
 	uploader.SetMediaID("")
 	response, err = uploader.WaitForProcessing()
 	assert.Error(t, err)
@@ -382,18 +430,18 @@ func TestExecuteMediaUpload(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	
+
 	client := &ApiClient{
 		url:    server.URL,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	err := ExecuteMediaUpload(tempFile, "image/jpeg", "tweet_image", "oauth2", "testuser", false, false, []string{}, client)
 	assert.NoError(t, err)
-	
+
 	err = ExecuteMediaUpload("nonexistent.txt", "image/jpeg", "tweet_image", "oauth2", "testuser", false, false, []string{}, client)
 	assert.Error(t, err)
 }
@@ -418,12 +466,12 @@ func TestExecuteMediaStatus(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	
+
 	client := &ApiClient{
 		url:    server.URL,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
-	
+
 	err := ExecuteMediaStatus("test_media_id", "oauth2", "testuser", false, false, []string{}, client)
 	assert.NoError(t, err)
 }
@@ -441,7 +489,7 @@ func TestExtractMediaID(t *testing.T) {
 		{"/2/media/upload", "", ""},
 		{"", "", ""},
 	}
-	
+
 	for _, tc := range testCases {
 		result := ExtractMediaID(tc.url, tc.data)
 		assert.Equal(t, tc.expected, result)
@@ -461,7 +509,7 @@ func TestExtractSegmentIndex(t *testing.T) {
 		{"/2/media/upload", "", ""},
 		{"", "", ""},
 	}
-	
+
 	for _, tc := range testCases {
 		result := ExtractSegmentIndex(tc.url, tc.data)
 		assert.Equal(t, tc.expected, result)
@@ -480,7 +528,7 @@ func TestIsMediaAppendRequest(t *testing.T) {
 		{"/2/users/me", "file.jpg", false},
 		{"", "", false},
 	}
-	
+
 	for _, tc := range testCases {
 		result := IsMediaAppendRequest(tc.url, tc.mediaFile)
 		assert.Equal(t, tc.expected, result)
@@ -489,55 +537,45 @@ func TestIsMediaAppendRequest(t *testing.T) {
 
 func TestHandleMediaAppendRequest(t *testing.T) {
 	mockClient := new(MockApiClient)
-	
-	tempFile := createTempTestFile(t, 1024)
+
+	tempFile, _ := createTempTestFile(t, 1024)
 	defer os.Remove(tempFile)
-	
+
 	mockResponse := json.RawMessage(`{}`)
-	
+
 	url := "/2/media/upload?command=APPEND&media_id=123456"
-	mockClient.On(
-		"SendMultipartRequest",
-		"POST",
-		url,
-		[]string{},
-		map[string]string{"command": "APPEND", "media_id": "123456", "segment_index": "0"},
-		"media",
-		tempFile,
-		"oauth2",
-		"testuser",
-		false,
-	).Return(mockResponse, nil)
-	
+	requestOptions := RequestOptions{
+		Method:   "POST",
+		Endpoint: url,
+		Headers:  []string{},
+		Data:     "",
+		AuthType: "oauth2",
+		Username: "testuser",
+		Verbose:  false,
+	}
+	multipartOptions := MultipartOptions{
+		RequestOptions: requestOptions,
+		FormFields:     map[string]string{"command": "APPEND", "media_id": "123456", "segment_index": "0"},
+		FileField:      "media",
+		FilePath:       tempFile,
+		FileName:       filepath.Base(tempFile),
+		FileData:       []byte{},
+	}
+	mockClient.On("SendMultipartRequest", multipartOptions).Return(mockResponse, nil).Twice()
+
 	response, err := HandleMediaAppendRequest(url, tempFile, "POST", []string{}, "", "oauth2", "testuser", false, mockClient)
 	assert.NoError(t, err)
 	assert.Equal(t, mockResponse, response)
-	
-	url = "/2/media/upload?command=APPEND"
-	data := "media_id=123456&segment_index=1"
-	mockClient.On(
-		"SendMultipartRequest",
-		"POST",
-		url,
-		[]string{},
-		map[string]string{"command": "APPEND", "media_id": "123456", "segment_index": "1"},
-		"media",
-		tempFile,
-		"oauth2",
-		"testuser",
-		false,
-	).Return(mockResponse, nil)
-	
-	response, err = HandleMediaAppendRequest(url, tempFile, "POST", []string{}, data, "oauth2", "testuser", false, mockClient)
+
+	response, err = HandleMediaAppendRequest(url, tempFile, "POST", []string{}, "", "oauth2", "testuser", false, mockClient)
 	assert.NoError(t, err)
 	assert.Equal(t, mockResponse, response)
-	
+
 	url = "/2/media/upload?command=APPEND"
-	data = ""
-	response, err = HandleMediaAppendRequest(url, tempFile, "POST", []string{}, data, "oauth2", "testuser", false, mockClient)
+	response, err = HandleMediaAppendRequest(url, tempFile, "POST", []string{}, "", "oauth2", "testuser", false, mockClient)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "media_id is required")
 	assert.Nil(t, response)
-	
+
 	mockClient.AssertExpectations(t)
-} 
+}

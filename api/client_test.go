@@ -26,13 +26,13 @@ func createTempTokenStore(t *testing.T) (*store.TokenStore, string) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	
+
 	tempFile := filepath.Join(tempDir, "tokens.json")
 	tokenStore := &store.TokenStore{
 		OAuth2Tokens: make(map[string]store.Token),
 		FilePath:     tempFile,
 	}
-	
+
 	return tokenStore, tempDir
 }
 
@@ -47,15 +47,15 @@ func createMockAuth(t *testing.T) (*auth.Auth, string) {
 		APIBaseURL:   "https://api.x.com",
 		InfoURL:      "https://api.x.com/2/users/me",
 	}
-	
+
 	mockAuth := auth.NewAuth(cfg)
 	tokenStore, tempDir := createTempTokenStore(t)
-	
+
 	err := tokenStore.SaveBearerToken("test-bearer-token")
 	if err != nil {
 		t.Fatalf("Failed to save bearer token: %v", err)
 	}
-	
+
 	mockAuth.WithTokenStore(tokenStore)
 	return mockAuth, tempDir
 }
@@ -66,9 +66,9 @@ func TestNewApiClient(t *testing.T) {
 	}
 	auth, tempDir := createMockAuth(t)
 	defer os.RemoveAll(tempDir)
-	
+
 	client := NewApiClient(cfg, auth)
-	
+
 	assert.Equal(t, cfg.APIBaseURL, client.url, "URL should match config")
 	assert.Equal(t, auth, client.auth, "Auth should be set correctly")
 	assert.NotNil(t, client.client, "HTTP client should not be nil")
@@ -81,9 +81,9 @@ func TestBuildRequest(t *testing.T) {
 	}
 	authMock, tempDir := createMockAuth(t)
 	defer os.RemoveAll(tempDir)
-	
+
 	client := NewApiClient(cfg, authMock)
-	
+
 	tests := []struct {
 		name       string
 		method     string
@@ -133,14 +133,14 @@ func TestBuildRequest(t *testing.T) {
 			wantErr:    false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var body io.Reader
 			contentType := ""
 			if tt.data != "" && (strings.ToUpper(tt.method) == "POST" || strings.ToUpper(tt.method) == "PUT" || strings.ToUpper(tt.method) == "PATCH") {
 				body = bytes.NewBufferString(tt.data)
-				
+
 				var js json.RawMessage
 				if json.Unmarshal([]byte(tt.data), &js) == nil {
 					contentType = "application/json"
@@ -148,30 +148,30 @@ func TestBuildRequest(t *testing.T) {
 					contentType = "application/x-www-form-urlencoded"
 				}
 			}
-			
+
 			req, err := client.BuildRequest(tt.method, tt.endpoint, tt.headers, body, contentType, tt.authType, tt.username)
-			
+
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
-			
+
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantMethod, req.Method)
 			assert.Equal(t, tt.wantURL, req.URL.String())
-			
+
 			for _, header := range tt.headers {
 				parts := strings.Split(header, ": ")
 				require.Len(t, parts, 2, "Invalid header format: %s", header)
-				
+
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
-				
+
 				assert.Equal(t, value, req.Header.Get(key))
 			}
 
 			assert.Equal(t, "xurl/dev", req.Header.Get("User-Agent"))
-			
+
 			if tt.method == "POST" && tt.data != "" {
 				assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
 			}
@@ -187,67 +187,97 @@ func TestSendRequest(t *testing.T) {
 			w.Write([]byte(`{"data":{"id":"12345","name":"Test User","username":"testuser"}}`))
 			return
 		}
-		
+
 		if r.URL.Path == "/2/tweets" && r.Method == "POST" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte(`{"data":{"id":"67890","text":"Hello world!"}}`))
 			return
 		}
-		
+
 		if r.URL.Path == "/2/tweets/search/recent" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"errors":[{"message":"Invalid query","code":400}]}`))
 			return
 		}
-		
+
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
-	
+
 	cfg := &config.Config{
 		APIBaseURL: server.URL,
 	}
 	authMock, tempDir := createMockAuth(t)
 	defer os.RemoveAll(tempDir)
 	client := NewApiClient(cfg, authMock)
-	
+
 	// Test successful GET request
 	t.Run("Get user profile", func(t *testing.T) {
-		resp, err := client.SendRequest("GET", "/2/users/me", []string{"Authorization: Bearer test-token"}, "", "", "", false)
-		
+		options := RequestOptions{
+			Method:   "GET",
+			Endpoint: "/2/users/me",
+			Headers:  []string{"Authorization: Bearer test-token"},
+			Data:     "",
+			AuthType: "",
+			Username: "",
+			Verbose:  false,
+		}
+
+		resp, err := client.SendRequest(options)
+
 		require.NoError(t, err)
-		
+
 		var result map[string]interface{}
 		err = json.Unmarshal(resp, &result)
 		require.NoError(t, err, "Failed to parse response")
-		
+
 		data, ok := result["data"].(map[string]interface{})
 		require.True(t, ok, "Expected data object in response")
-		
+
 		assert.Equal(t, "testuser", data["username"], "Username should match")
 	})
-	
+
 	// Test successful POST request
 	t.Run("Post tweet", func(t *testing.T) {
-		resp, err := client.SendRequest("POST", "/2/tweets", []string{"Authorization: Bearer test-token"}, `{"text":"Hello world!"}`, "", "", false)
-		
+		options := RequestOptions{
+			Method:   "POST",
+			Endpoint: "/2/tweets",
+			Headers:  []string{"Authorization: Bearer test-token"},
+			Data:     `{"text":"Hello world!"}`,
+			AuthType: "",
+			Username: "",
+			Verbose:  false,
+		}
+
+		resp, err := client.SendRequest(options)
+
 		require.NoError(t, err)
-		
+
 		var result map[string]interface{}
 		err = json.Unmarshal(resp, &result)
 		require.NoError(t, err, "Failed to parse response")
-		
+
 		data, ok := result["data"].(map[string]interface{})
 		require.True(t, ok, "Expected data object in response")
-		
+
 		assert.Equal(t, "Hello world!", data["text"], "Tweet text should match")
 	})
-	
+
 	t.Run("Error response", func(t *testing.T) {
-		resp, err := client.SendRequest("GET", "/2/tweets/search/recent", []string{"Authorization: Bearer test-token"}, "", "", "", false)
-		
+		options := RequestOptions{
+			Method:   "GET",
+			Endpoint: "/2/tweets/search/recent",
+			Headers:  []string{"Authorization: Bearer test-token"},
+			Data:     "",
+			AuthType: "",
+			Username: "",
+			Verbose:  false,
+		}
+
+		resp, err := client.SendRequest(options)
+
 		assert.Error(t, err, "Expected an error")
 		assert.Nil(t, resp, "Response should be nil")
 		assert.True(t, xurlErrors.IsAPIError(err), "Expected API error")
@@ -258,23 +288,23 @@ func TestGetAuthHeader(t *testing.T) {
 	cfg := &config.Config{
 		APIBaseURL: "https://api.x.com",
 	}
-	
+
 	t.Run("No auth set", func(t *testing.T) {
 		client := NewApiClient(cfg, nil)
-		
+
 		_, err := client.GetAuthHeader("GET", "https://api.x.com/2/users/me", "", "")
-		
+
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
 	})
-	
+
 	t.Run("Invalid auth type", func(t *testing.T) {
 		authMock, tempDir := createMockAuth(t)
 		defer os.RemoveAll(tempDir)
 		client := NewApiClient(cfg, authMock)
-		
+
 		_, err := client.GetAuthHeader("GET", "https://api.x.com/2/users/me", "invalid", "")
-		
+
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
 	})
@@ -283,7 +313,7 @@ func TestGetAuthHeader(t *testing.T) {
 func TestStreamRequest(t *testing.T) {
 	// This is a basic test for the StreamRequest method
 	// A more comprehensive test would require mocking the streaming response
-	
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/2/tweets/search/stream" {
 			w.Header().Set("Content-Type", "application/json")
@@ -292,28 +322,38 @@ func TestStreamRequest(t *testing.T) {
 			// but for this simple test, we'll just close the connection
 			return
 		}
-		
+
 		if r.URL.Path == "/2/tweets/search/stream/error" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"errors":[{"message":"Invalid rule","code":400}]}`))
 			return
 		}
-		
+
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
-	
+
 	cfg := &config.Config{
 		APIBaseURL: server.URL,
 	}
 	authMock, tempDir := createMockAuth(t)
 	defer os.RemoveAll(tempDir)
 	client := NewApiClient(cfg, authMock)
-	
+
 	t.Run("Stream error response", func(t *testing.T) {
-		err := client.StreamRequest("GET", "/2/tweets/search/stream/error", []string{"Authorization: Bearer test-token"}, "", "", "", false)
-		
+		options := RequestOptions{
+			Method:   "GET",
+			Endpoint: "/2/tweets/search/stream/error",
+			Headers:  []string{"Authorization: Bearer test-token"},
+			Data:     "",
+			AuthType: "",
+			Username: "",
+			Verbose:  false,
+		}
+
+		err := client.StreamRequest(options)
+
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAPIError(err), "Expected API error")
 	})

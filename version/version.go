@@ -8,4 +8,4 @@ var (
 	Commit = "none"
 	// BuildDate is the date when the binary was built
 	BuildDate = "unknown"
-) 
+)

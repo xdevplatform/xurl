@@ -29,7 +29,7 @@ func CreateMediaCommand(auth *auth.Auth) *cobra.Command {
 func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 	var mediaType, mediaCategory string
 	var waitForProcessing bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "upload [flags] FILE",
 		Short: "Upload media file",
@@ -43,7 +43,7 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 			headers, _ := cmd.Flags().GetStringArray("header")
 			config := config.NewConfig()
 			client := api.NewApiClient(config, auth)
-			
+
 			err := api.ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username, verbose, waitForProcessing, headers, client)
 			if err != nil {
 				fmt.Printf("\033[31m%v\033[0m\n", err)
@@ -51,7 +51,7 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 			}
 		},
 	}
-	
+
 	cmd.Flags().StringVar(&mediaType, "media-type", "video/mp4", "Media type (e.g., image/jpeg, image/png, video/mp4)")
 	cmd.Flags().StringVar(&mediaCategory, "category", "amplify_video", "Media category (e.g., tweet_image, tweet_video, amplify_video)")
 	cmd.Flags().BoolVar(&waitForProcessing, "wait", true, "Wait for media processing to complete")
@@ -59,7 +59,7 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	cmd.Flags().StringArrayP("header", "H", []string{}, "Request headers")
-	
+
 	return cmd
 }
 
@@ -79,7 +79,7 @@ func createMediaStatusCmd(auth *auth.Auth) *cobra.Command {
 			headers, _ := cmd.Flags().GetStringArray("header")
 			config := config.NewConfig()
 			client := api.NewApiClient(config, auth)
-			
+
 			err := api.ExecuteMediaStatus(mediaID, authType, username, verbose, wait, headers, client)
 			if err != nil {
 				fmt.Printf("\033[31m%v\033[0m\n", err)
@@ -87,7 +87,7 @@ func createMediaStatusCmd(auth *auth.Auth) *cobra.Command {
 			}
 		},
 	}
-	
+
 	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	cmd.Flags().Bool("verbose", false, "Print verbose information")

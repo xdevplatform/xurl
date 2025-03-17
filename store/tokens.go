@@ -37,10 +37,10 @@ const (
 
 // Token represents an authentication token
 type Token struct {
-	Type      TokenType   `json:"type"`
-	Bearer    string      `json:"bearer,omitempty"`
-	OAuth2    *OAuth2Token `json:"oauth2,omitempty"`
-	OAuth1    *OAuth1Token `json:"oauth1,omitempty"`
+	Type   TokenType    `json:"type"`
+	Bearer string       `json:"bearer,omitempty"`
+	OAuth2 *OAuth2Token `json:"oauth2,omitempty"`
+	OAuth1 *OAuth1Token `json:"oauth1,omitempty"`
 }
 
 // Manages authentication tokens
@@ -60,7 +60,7 @@ func NewTokenStore() *TokenStore {
 	}
 
 	filePath := filepath.Join(homeDir, ".xurl")
-	
+
 	store := &TokenStore{
 		OAuth2Tokens: make(map[string]Token),
 		FilePath:     filePath,
@@ -100,11 +100,11 @@ func (s *TokenStore) importFromTwurlrc(filePath string) error {
 
 	var twurlConfig struct {
 		Profiles map[string]map[string]struct {
-			Username      string `yaml:"username"`
-			ConsumerKey   string `yaml:"consumer_key"`
+			Username       string `yaml:"username"`
+			ConsumerKey    string `yaml:"consumer_key"`
 			ConsumerSecret string `yaml:"consumer_secret"`
-			Token         string `yaml:"token"`
-			Secret        string `yaml:"secret"`
+			Token          string `yaml:"token"`
+			Secret         string `yaml:"secret"`
 		} `yaml:"profiles"`
 		Configuration struct {
 			DefaultProfile []string `yaml:"default_profile"`
@@ -130,7 +130,7 @@ func (s *TokenStore) importFromTwurlrc(filePath string) error {
 					},
 				}
 			}
-			
+
 			break
 		}
 		break
@@ -150,7 +150,7 @@ func (s *TokenStore) importFromTwurlrc(filePath string) error {
 	return s.saveToFile()
 }
 
-// 	aves a bearer token
+// aves a bearer token
 func (s *TokenStore) SaveBearerToken(token string) error {
 	s.BearerToken = &Token{
 		Type:   BearerTokenType,
@@ -270,4 +270,4 @@ func (s *TokenStore) saveToFile() error {
 	}
 
 	return nil
-} 
+}

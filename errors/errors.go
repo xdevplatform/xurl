@@ -85,8 +85,8 @@ func IsErrorType(err error, errorType string) bool {
 	return false
 }
 
-func IsHTTPError(err error) bool   { return IsErrorType(err, ErrTypeHTTP) }
-func IsIOError(err error) bool     { return IsErrorType(err, ErrTypeIO) }
-func IsAPIError(err error) bool    { return IsErrorType(err, ErrTypeAPI) }
-func IsJSONError(err error) bool   { return IsErrorType(err, ErrTypeJSON) }
-func IsAuthError(err error) bool   { return IsErrorType(err, ErrTypeAuth) } 
+func IsHTTPError(err error) bool { return IsErrorType(err, ErrTypeHTTP) }
+func IsIOError(err error) bool   { return IsErrorType(err, ErrTypeIO) }
+func IsAPIError(err error) bool  { return IsErrorType(err, ErrTypeAPI) }
+func IsJSONError(err error) bool { return IsErrorType(err, ErrTypeJSON) }
+func IsAuthError(err error) bool { return IsErrorType(err, ErrTypeAuth) }

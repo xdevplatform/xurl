@@ -29,7 +29,7 @@ func CreateAuthCommand(auth *auth.Auth) *cobra.Command {
 // Create auth app subcommand
 func createAuthAppCmd(auth *auth.Auth) *cobra.Command {
 	var bearerToken string
-	
+
 	cmd := &cobra.Command{
 		Use:   "app",
 		Short: "Configure app-auth",
@@ -42,10 +42,10 @@ func createAuthAppCmd(auth *auth.Auth) *cobra.Command {
 			fmt.Printf("\033[32mApp authentication successful!\033[0m\n")
 		},
 	}
-	
+
 	cmd.Flags().StringVar(&bearerToken, "bearer-token", "", "Bearer token for app authentication")
 	cmd.MarkFlagRequired("bearer-token")
-	
+
 	return cmd
 }
 
@@ -63,14 +63,14 @@ func createAuthOAuth2Cmd(auth *auth.Auth) *cobra.Command {
 			fmt.Printf("\033[32mOAuth2 authentication successful!\033[0m\n")
 		},
 	}
-	
+
 	return cmd
 }
 
 // Create auth oauth1 subcommand
 func createAuthOAuth1Cmd(auth *auth.Auth) *cobra.Command {
 	var consumerKey, consumerSecret, accessToken, tokenSecret string
-	
+
 	cmd := &cobra.Command{
 		Use:   "oauth1",
 		Short: "Configure OAuth1 authentication",
@@ -83,17 +83,17 @@ func createAuthOAuth1Cmd(auth *auth.Auth) *cobra.Command {
 			fmt.Printf("\033[32mOAuth1 credentials saved successfully!\033[0m\n")
 		},
 	}
-	
+
 	cmd.Flags().StringVar(&consumerKey, "consumer-key", "", "Consumer key for OAuth1")
 	cmd.Flags().StringVar(&consumerSecret, "consumer-secret", "", "Consumer secret for OAuth1")
 	cmd.Flags().StringVar(&accessToken, "access-token", "", "Access token for OAuth1")
 	cmd.Flags().StringVar(&tokenSecret, "token-secret", "", "Token secret for OAuth1")
-	
+
 	cmd.MarkFlagRequired("consumer-key")
 	cmd.MarkFlagRequired("consumer-secret")
 	cmd.MarkFlagRequired("access-token")
 	cmd.MarkFlagRequired("token-secret")
-	
+
 	return cmd
 }
 
@@ -104,7 +104,7 @@ func createAuthStatusCmd() *cobra.Command {
 		Short: "Show authentication status",
 		Run: func(cmd *cobra.Command, args []string) {
 			store := store.NewTokenStore()
-			
+
 			fmt.Println("OAuth2 Accounts:")
 			if len(store.GetOAuth2Usernames()) == 0 {
 				fmt.Println("No OAuth2 accounts configured")
@@ -113,13 +113,13 @@ func createAuthStatusCmd() *cobra.Command {
 					fmt.Println("-", username)
 				}
 			}
-			
+
 			hasOAuth1 := "Not configured"
 			if store.HasOAuth1Tokens() {
 				hasOAuth1 = "Configured"
 			}
 			fmt.Println("OAuth1:", hasOAuth1)
-			
+
 			hasBearer := "Not configured"
 			if store.HasBearerToken() {
 				hasBearer = "Configured"
@@ -127,7 +127,7 @@ func createAuthStatusCmd() *cobra.Command {
 			fmt.Println("App Auth:", hasBearer)
 		},
 	}
-	
+
 	return cmd
 }
 
@@ -135,7 +135,7 @@ func createAuthStatusCmd() *cobra.Command {
 func createAuthClearCmd(auth *auth.Auth) *cobra.Command {
 	var all, oauth1, bearer bool
 	var oauth2Username string
-	
+
 	cmd := &cobra.Command{
 		Use:   "clear",
 		Short: "Clear authentication tokens",
@@ -160,7 +160,7 @@ func createAuthClearCmd(auth *auth.Auth) *cobra.Command {
 					fmt.Println("Error clearing OAuth2 token:", err)
 					os.Exit(1)
 				}
-				fmt.Println("OAuth2 token cleared for", oauth2Username + "!")
+				fmt.Println("OAuth2 token cleared for", oauth2Username+"!")
 			} else if bearer {
 				err := auth.TokenStore.ClearBearerToken()
 				if err != nil {
@@ -174,11 +174,11 @@ func createAuthClearCmd(auth *auth.Auth) *cobra.Command {
 			}
 		},
 	}
-	
+
 	cmd.Flags().BoolVar(&all, "all", false, "Clear all authentication")
 	cmd.Flags().BoolVar(&oauth1, "oauth1", false, "Clear OAuth1 tokens")
 	cmd.Flags().StringVar(&oauth2Username, "oauth2-username", "", "Clear OAuth2 token for username")
 	cmd.Flags().BoolVar(&bearer, "bearer", false, "Clear bearer token")
-	
+
 	return cmd
 }

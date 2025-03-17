@@ -6,10 +6,10 @@ import (
 
 // StreamingEndpoints is a map of endpoint prefixes that should be streamed
 var StreamingEndpoints = map[string]bool{
-	"/2/tweets/search/stream":			 true,
-	"/2/tweets/sample/stream":     		 true,
-	"/2/tweets/sample10/stream":	     true,
-	"/2/tweets/firehose/stream":   		 true,
+	"/2/tweets/search/stream":           true,
+	"/2/tweets/sample/stream":           true,
+	"/2/tweets/sample10/stream":         true,
+	"/2/tweets/firehose/stream":         true,
 	"/2/tweets/firehose/stream/lang/en": true,
 	"/2/tweets/firehose/stream/lang/ja": true,
 	"/2/tweets/firehose/stream/lang/ko": true,
@@ -25,18 +25,18 @@ func IsStreamingEndpoint(endpoint string) bool {
 			path = "/" + parsedURL[3]
 		}
 	}
-	
+
 	normalizedEndpoint := strings.TrimSuffix(path, "/")
-	
+
 	if StreamingEndpoints[normalizedEndpoint] {
 		return true
 	}
-	
+
 	for streamingEndpoint := range StreamingEndpoints {
 		if strings.HasPrefix(normalizedEndpoint, streamingEndpoint) {
 			return true
 		}
 	}
-	
+
 	return false
-} 
+}
