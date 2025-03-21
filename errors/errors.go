@@ -23,6 +23,11 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
+	var js json.RawMessage
+	if json.Unmarshal([]byte(e.Message), &js) == nil {
+		return string(js)
+	}
+
 	if e.cause != nil {
 		return fmt.Sprintf("%s: %s (cause: %s)", e.Type, e.Message, e.cause)
 	}
