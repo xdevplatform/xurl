@@ -395,6 +395,7 @@ func getOAuth2Scopes() []string {
 		"block.read",
 		"mute.read",
 		"like.read",
+		"users.email",
 	}
 
 	writeScopes := []string{
