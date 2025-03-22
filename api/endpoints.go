@@ -28,15 +28,5 @@ func IsStreamingEndpoint(endpoint string) bool {
 
 	normalizedEndpoint := strings.TrimSuffix(path, "/")
 
-	if StreamingEndpoints[normalizedEndpoint] {
-		return true
-	}
-
-	for streamingEndpoint := range StreamingEndpoints {
-		if strings.HasPrefix(normalizedEndpoint, streamingEndpoint) {
-			return true
-		}
-	}
-
-	return false
+	return StreamingEndpoints[normalizedEndpoint]
 }
