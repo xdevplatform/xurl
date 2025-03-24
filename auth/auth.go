@@ -312,20 +312,20 @@ func (a *Auth) fetchUsername(accessToken string) (string, error) {
 		return "", xurlErrors.NewAuthError("IOError", err)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(body, &data); err != nil {
 		return "", xurlErrors.NewAuthError("JSONDeserializationError", err)
 	}
 
 	if data["data"] != nil {
-		if userData, ok := data["data"].(map[string]interface{}); ok {
+		if userData, ok := data["data"].(map[string]any); ok {
 			if username, ok := userData["username"].(string); ok {
 				return username, nil
 			}
 		}
 	}
 
-	return "", xurlErrors.NewAuthError("UsernameNotFound", errors.New("username not found in response"))
+	return "", xurlErrors.NewAuthError("UsernameNotFound", errors.New("username not found when fetching username"))
 }
 
 func generateSignature(method, urlStr string, params map[string]string, consumerSecret, tokenSecret string) (string, error) {

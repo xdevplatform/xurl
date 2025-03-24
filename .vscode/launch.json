@@ -5,11 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "lldb",
-            "request": "launch",
             "name": "Debug",
-            "program": "${workspaceFolder}/<executable file>",
-            "args": [],
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}",
+            "args": ["auth", "oauth2"],
             "cwd": "${workspaceFolder}"
         }
     ]

@@ -26,6 +26,11 @@ func IsStreamingEndpoint(endpoint string) bool {
 		}
 	}
 
+	// Remove query parameters if present
+	if queryIndex := strings.Index(path, "?"); queryIndex != -1 {
+		path = path[:queryIndex]
+	}
+
 	normalizedEndpoint := strings.TrimSuffix(path, "/")
 
 	return StreamingEndpoints[normalizedEndpoint]
