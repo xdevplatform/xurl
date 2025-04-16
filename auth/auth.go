@@ -396,6 +396,7 @@ func getOAuth2Scopes() []string {
 		"mute.read",
 		"like.read",
 		"users.email",
+		"dm.read",
 	}
 
 	writeScopes := []string{
@@ -408,6 +409,7 @@ func getOAuth2Scopes() []string {
 		"like.write",
 		"list.write",
 		"media.write",
+		"dm.write",
 	}
 
 	otherScopes := []string{
