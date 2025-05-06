@@ -113,6 +113,33 @@ You can also force streaming mode for any endpoint using the `--stream` or `-s` 
 xurl -s /2/users/me
 ```
 
+### Temporary Webhook Setup
+
+`xurl` can help you quickly set up a temporary webhook URL to receive events from the X API. This is useful for development and testing.
+
+1.  **Start the local webhook server with ngrok:**
+
+    Run the `webhook start` command. This will start a local server and use ngrok to create a public URL that forwards to your local server. You will be prompted for your ngrok authtoken if it's not already configured via the `NGROK_AUTHTOKEN` environment variable.
+
+    ```bash
+    xurl webhook start
+    # Or with a specific port and output file for POST bodies
+    xurl webhook start -p 8081 -o webhook_events.log
+    ```
+
+    The command will output an ngrok URL (e.g., `https://your-unique-id.ngrok-free.app/webhook`). Note this URL.
+
+2.  **Register the webhook with the X API:**
+
+    Use the ngrok URL obtained in the previous step to register your webhook. You'll typically use app authentication for this.
+
+    ```bash
+    # Replace https://your-ngrok-url.ngrok-free.app/webhook with the actual URL from the previous step
+    xurl --auth app /2/webhooks -d '{"url": "<your ngrok url>"}' -X POST
+    ```
+
+    Your local `xurl webhook start` server will then handle the CRC handshake from Twitter and log incoming POST events (and write them to a file if `-o` was used).
+
 ### Media Upload
 
 The tool supports uploading media files to the X API using the chunked upload process.
