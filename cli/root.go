@@ -88,6 +88,7 @@ Examples:
 	rootCmd.AddCommand(CreateAuthCommand(auth))
 	rootCmd.AddCommand(CreateMediaCommand(auth))
 	rootCmd.AddCommand(CreateVersionCommand())
+	rootCmd.AddCommand(CreateWebhookCommand(auth))
 
 	return rootCmd
 }
