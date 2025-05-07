@@ -27,10 +27,17 @@ type MediaUploader struct {
 	authType string
 	username string
 	headers  []string
+	trace    bool
+}
+
+type InitRequest struct {
+	TotalBytes    int64  `json:"total_bytes"`
+	MediaType     string `json:"media_type"`
+	MediaCategory string `json:"media_category"`
 }
 
 // NewMediaUploader creates a new MediaUploader
-func NewMediaUploader(client Client, filePath string, verbose bool, authType string, username string, headers []string) (*MediaUploader, error) {
+func NewMediaUploader(client Client, filePath string, verbose, trace bool, authType string, username string, headers []string) (*MediaUploader, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error accessing file: %v", err)
@@ -49,16 +56,18 @@ func NewMediaUploader(client Client, filePath string, verbose bool, authType str
 		authType: authType,
 		username: username,
 		headers:  headers,
+		trace:    trace,
 	}, nil
 }
 
-func NewMediaUploaderWithoutFile(client Client, verbose bool, authType string, username string, headers []string) *MediaUploader {
+func NewMediaUploaderWithoutFile(client Client, verbose, trace bool, authType string, username string, headers []string) *MediaUploader {
 	return &MediaUploader{
 		client:   client,
 		verbose:  verbose,
 		authType: authType,
 		username: username,
 		headers:  headers,
+		trace:    trace,
 	}
 }
 
@@ -69,19 +78,27 @@ func (m *MediaUploader) Init(mediaType string, mediaCategory string) error {
 	}
 
 	finalUrl := MediaEndpoint +
-		"?command=INIT" +
-		"&total_bytes=" + strconv.FormatInt(m.fileSize, 10) +
-		"&media_type=" + mediaType +
-		"&media_category=" + mediaCategory
+		"/initialize"
+
+	body := InitRequest{
+		TotalBytes:    m.fileSize,
+		MediaType:     mediaType,
+		MediaCategory: mediaCategory,
+	}
+	jsonData, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("error marshalling body: %v", err)
+	}
 
 	requestOptions := RequestOptions{
 		Method:   "POST",
 		Endpoint: finalUrl,
 		Headers:  m.headers,
-		Data:     "",
+		Data:     string(jsonData),
 		AuthType: m.authType,
 		Username: m.username,
 		Verbose:  m.verbose,
+		Trace:    m.trace,
 	}
 
 	response, clientErr := m.client.SendRequest(requestOptions)
@@ -142,27 +159,27 @@ func (m *MediaUploader) Append() error {
 			return fmt.Errorf("error reading file: %v", err)
 		}
 
+		finalUrl := MediaEndpoint + fmt.Sprintf("/%s/append", m.mediaID)
+
 		// Prepare form fields
 		formFields := map[string]string{
-			"command":       "APPEND",
-			"media_id":      m.mediaID,
 			"segment_index": strconv.Itoa(segmentIndex),
 		}
 
 		requestOptions := RequestOptions{
 			Method:   "POST",
-			Endpoint: MediaEndpoint,
+			Endpoint: finalUrl,
 			Headers:  m.headers,
 			Data:     "",
 			AuthType: m.authType,
 			Username: m.username,
 			Verbose:  m.verbose,
+			Trace:    m.trace,
 		}
 		multipartOptions := MultipartOptions{
 			RequestOptions: requestOptions,
 			FormFields:     formFields,
 			FileField:      "media",
-			FilePath:       m.filePath,
 			FileName:       filepath.Base(m.filePath),
 			FileData:       buffer[:bytesRead],
 		}
@@ -199,7 +216,7 @@ func (m *MediaUploader) Finalize() (json.RawMessage, error) {
 		fmt.Printf("\033[32mFinalizing media upload...\033[0m\n")
 	}
 
-	finalUrl := MediaEndpoint + "?command=FINALIZE&media_id=" + m.mediaID
+	finalUrl := MediaEndpoint + fmt.Sprintf("/%s/finalize", m.mediaID)
 	requestOptions := RequestOptions{
 		Method:   "POST",
 		Endpoint: finalUrl,
@@ -208,6 +225,7 @@ func (m *MediaUploader) Finalize() (json.RawMessage, error) {
 		AuthType: m.authType,
 		Username: m.username,
 		Verbose:  m.verbose,
+		Trace:    m.trace,
 	}
 	response, clientErr := m.client.SendRequest(requestOptions)
 	if clientErr != nil {
@@ -237,6 +255,7 @@ func (m *MediaUploader) CheckStatus() (json.RawMessage, error) {
 		AuthType: m.authType,
 		Username: m.username,
 		Verbose:  m.verbose,
+		Trace:    m.trace,
 	}
 	response, clientErr := m.client.SendRequest(requestOptions)
 	if clientErr != nil {
@@ -316,8 +335,8 @@ func (m *MediaUploader) SetMediaID(mediaID string) {
 }
 
 // ExecuteMediaUpload handles the media upload command execution
-func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username string, verbose, waitForProcessing bool, headers []string, client Client) error {
-	uploader, err := NewMediaUploader(client, filePath, verbose, authType, username, headers)
+func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username string, verbose, waitForProcessing, trace bool, headers []string, client Client) error {
+	uploader, err := NewMediaUploader(client, filePath, verbose, trace, authType, username, headers)
 	if err != nil {
 		return fmt.Errorf("error: %v", err)
 	}
@@ -352,8 +371,8 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 }
 
 // ExecuteMediaStatus handles the media status command execution
-func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, headers []string, client Client) error {
-	uploader := NewMediaUploaderWithoutFile(client, verbose, authType, username, headers)
+func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait, trace bool, headers []string, client Client) error {
+	uploader := NewMediaUploaderWithoutFile(client, verbose, trace, authType, username, headers)
 
 	uploader.SetMediaID(mediaID)
 
@@ -386,19 +405,25 @@ func ExecuteMediaStatus(mediaID, authType, username string, verbose, wait bool, 
 
 // HandleMediaAppendRequest handles a media append request with a file
 func HandleMediaAppendRequest(options RequestOptions, mediaFile string, client Client) (json.RawMessage, error) {
-	mediaID := ExtractMediaID(options.Endpoint, options.Data)
+	// TODO: This function is in a weird state since append accepts either a multipart request or a json request
+	// Right now, this function takes in segment_index from the json request and sends a multipart request
+	// We should refactor this to handle both cases (by adding curl-like multipart request support)
+	// example usage:
+	// xurl -X POST "/2/media/upload/{id}/append" \
+	//   -H "Content-Type: multipart/form-data" \
+	//   -F "media=@/path/to/your/file.mp4" \
+	//   -F "segment_index=0"
+	mediaID := ExtractMediaID(options.Endpoint)
 	if mediaID == "" {
-		return nil, fmt.Errorf("media_id is required for APPEND command")
+		return nil, fmt.Errorf("media_id is required for append endpoint")
 	}
 
-	segmentIndex := ExtractSegmentIndex(options.Endpoint, options.Data)
+	segmentIndex := ExtractSegmentIndex(options.Data)
 	if segmentIndex == "" {
 		segmentIndex = "0"
 	}
 
 	formFields := map[string]string{
-		"command":       "APPEND",
-		"media_id":      mediaID,
 		"segment_index": segmentIndex,
 	}
 
@@ -421,62 +446,83 @@ func HandleMediaAppendRequest(options RequestOptions, mediaFile string, client C
 }
 
 // ExtractMediaID extracts media_id from URL or data
-func ExtractMediaID(url string, data string) string {
-	if strings.Contains(url, "media_id=") {
-		parts := strings.Split(url, "media_id=")
+func ExtractMediaID(url string) string {
+	if url == "" {
+		return ""
+	}
+
+	if !strings.Contains(url, "/2/media/upload") {
+		return ""
+	}
+
+	if strings.HasSuffix(url, "/2/media/upload/initialize") {
+		return ""
+	}
+
+	// Extract media ID from path for append/finalize endpoints
+	if strings.Contains(url, "/2/media/upload/") {
+		parts := strings.Split(url, "/2/media/upload/")
 		if len(parts) > 1 {
-			mediaID := parts[1]
-			if idx := strings.Index(mediaID, "&"); idx != -1 {
-				mediaID = mediaID[:idx]
+			path := parts[1]
+			for _, suffix := range []string{"/append", "/finalize"} {
+				if idx := strings.Index(path, suffix); idx != -1 {
+					return path[:idx]
+				}
 			}
-			return mediaID
 		}
 	}
 
-	if strings.Contains(data, "media_id=") {
-		parts := strings.Split(data, "media_id=")
-		if len(parts) > 1 {
-			mediaID := parts[1]
-			if idx := strings.Index(mediaID, "&"); idx != -1 {
-				mediaID = mediaID[:idx]
+	if strings.Contains(url, "?") {
+		queryParams := strings.Split(url, "?")
+		if len(queryParams) > 1 {
+			params := strings.Split(queryParams[1], "&")
+			for _, param := range params {
+				if strings.HasPrefix(param, "media_id=") {
+					return strings.Split(param, "=")[1]
+				}
 			}
-			return mediaID
 		}
+	}
+
+	return ""
+}
+
+// extracts command from URL
+func ExtractCommand(url string) string {
+	if strings.Contains(url, "/2/media/upload/") {
+		parts := strings.Split(url, "/2/media/upload/")
+		if len(parts) > 1 {
+			path := parts[1]
+			if strings.Contains(path, "/append") {
+				return "append"
+			}
+			if strings.Contains(path, "/finalize") {
+				return "finalize"
+			}
+			if path == "initialize" {
+				return "initialize"
+			}
+		}
+		return "status"
 	}
 
 	return ""
 }
 
 // ExtractSegmentIndex extracts segment_index from URL or data
-func ExtractSegmentIndex(url string, data string) string {
-	if strings.Contains(url, "segment_index=") {
-		parts := strings.Split(url, "segment_index=")
-		if len(parts) > 1 {
-			segmentIndex := parts[1]
-			if idx := strings.Index(segmentIndex, "&"); idx != -1 {
-				segmentIndex = segmentIndex[:idx]
-			}
+func ExtractSegmentIndex(data string) string {
+	var jsonData map[string]string
+	if err := json.Unmarshal([]byte(data), &jsonData); err == nil {
+		if segmentIndex, ok := jsonData["segment_index"]; ok {
 			return segmentIndex
 		}
 	}
-
-	if strings.Contains(data, "segment_index=") {
-		parts := strings.Split(data, "segment_index=")
-		if len(parts) > 1 {
-			segmentIndex := parts[1]
-			if idx := strings.Index(segmentIndex, "&"); idx != -1 {
-				segmentIndex = segmentIndex[:idx]
-			}
-			return segmentIndex
-		}
-	}
-
 	return ""
 }
 
 // IsMediaAppendRequest checks if the request is a media append request
 func IsMediaAppendRequest(url string, mediaFile string) bool {
 	return strings.Contains(url, "/2/media/upload") &&
-		strings.Contains(url, "command=APPEND") &&
+		strings.Contains(url, "append") &&
 		mediaFile != ""
 }
