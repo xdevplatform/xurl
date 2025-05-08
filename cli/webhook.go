@@ -14,18 +14,19 @@ import (
 	"os"
 	"strings"
 
+	"xurl/auth"
+
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/tidwall/pretty"
 	"golang.ngrok.com/ngrok"
 	"golang.ngrok.com/ngrok/config"
-	"xurl/auth"
 )
 
 var webhookPort int
 var outputFileName string // To store the output file name from the flag
-var quietMode bool // To store the quiet flag state
-var prettyMode bool // To store the pretty-print flag state
+var quietMode bool        // To store the quiet flag state
+var prettyMode bool       // To store the pretty-print flag state
 
 // CreateWebhookCommand creates the webhook command and its subcommands.
 func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
@@ -96,7 +97,7 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 				os.Exit(1)
 			}
 			defer ngrokListener.Close()
-			
+
 			color.Green("Ngrok tunnel established!")
 			fmt.Printf("  Forwarding URL: %s -> %s\n", color.HiGreenString(ngrokListener.URL()), color.MagentaString(forwardToAddr))
 			color.Yellow("Use this URL for your X API webhook registration: %s/webhook", color.HiGreenString(ngrokListener.URL()))
@@ -190,4 +191,4 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 
 	webhookCmd.AddCommand(webhookStartCmd)
 	return webhookCmd
-} 
+}
