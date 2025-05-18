@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"xurl/auth"
-	"xurl/config"
-	xurlErrors "xurl/errors"
-	"xurl/store"
+	"github.com/xdevplatform/xurl/auth"
+	"github.com/xdevplatform/xurl/config"
+	xurlErrors "github.com/xdevplatform/xurl/errors"
+	"github.com/xdevplatform/xurl/store"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

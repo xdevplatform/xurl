@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"xurl/auth"
-	"xurl/store"
+	"github.com/xdevplatform/xurl/auth"
+	"github.com/xdevplatform/xurl/store"
 )
 
 // CreateAuthCommand creates the auth command and its subcommands

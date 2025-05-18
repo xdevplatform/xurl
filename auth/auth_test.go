@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"xurl/config"
-	"xurl/store"
+	"github.com/xdevplatform/xurl/config"
+	"github.com/xdevplatform/xurl/store"
 )
 
 // Helper function to create a temporary token store for testing
