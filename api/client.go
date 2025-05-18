@@ -14,10 +14,11 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
-	"xurl/auth"
-	"xurl/config"
-	xurlErrors "xurl/errors"
-	"xurl/version"
+
+	"github.com/xdevplatform/xurl/auth"
+	"github.com/xdevplatform/xurl/config"
+	xurlErrors "github.com/xdevplatform/xurl/errors"
+	"github.com/xdevplatform/xurl/version"
 )
 
 // RequestOptions contains common options for API requests

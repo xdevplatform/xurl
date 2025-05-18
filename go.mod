@@ -1,4 +1,4 @@
-module xurl
+module github.com/xdevplatform/xurl
 
 go 1.21
 
@@ -6,6 +6,8 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.10.0
+	github.com/tidwall/pretty v1.2.1
+	golang.ngrok.com/ngrok v1.13.0
 	golang.org/x/oauth2 v0.18.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -23,10 +25,8 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.ngrok.com/muxado/v2 v2.0.1 // indirect
-	golang.ngrok.com/ngrok v1.13.0 // indirect
 	golang.org/x/net v0.30.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect

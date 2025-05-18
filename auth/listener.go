@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	xurlErrors "xurl/errors"
+	xurlErrors "github.com/xdevplatform/xurl/errors"
 )
 
 func StartListener(port int, callback func(code, state string) error) error {

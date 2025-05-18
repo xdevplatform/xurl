@@ -14,7 +14,7 @@ import (
 	"os"
 	"strings"
 
-	"xurl/auth"
+	"github.com/xdevplatform/xurl/auth"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
