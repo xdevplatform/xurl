@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -407,6 +408,57 @@ func MuteUser(client Client, sourceUserID, targetUserID string, opts RequestOpti
 func UnmuteUser(client Client, sourceUserID, targetUserID string, opts RequestOptions) (json.RawMessage, error) {
 	opts.Method = "DELETE"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/muting/%s", sourceUserID, targetUserID)
+	opts.Data = ""
+
+	return client.SendRequest(opts)
+}
+
+// sinceIDRegex validates that since_id is purely numeric (H4).
+var sinceIDRegex = regexp.MustCompile(`^[0-9]+$`)
+
+// SearchRecentWithSinceID searches recent posts with since_id support for polling.
+// Includes media expansions and reply fields needed by the bot.
+func SearchRecentWithSinceID(client Client, query string, sinceID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	q := url.QueryEscape(query)
+
+	if maxResults < 10 {
+		maxResults = 10
+	} else if maxResults > 100 {
+		maxResults = 100
+	}
+
+	endpoint := fmt.Sprintf(
+		"/2/tweets/search/recent?query=%s&max_results=%d"+
+			"&tweet.fields=created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets,entities,attachments"+
+			"&expansions=author_id,attachments.media_keys,referenced_tweets.id"+
+			"&media.fields=url,preview_image_url,type"+
+			"&user.fields=username,name,verified",
+		q, maxResults,
+	)
+	// H4: Validate since_id is numeric before appending to URL
+	if sinceID != "" && sinceIDRegex.MatchString(sinceID) {
+		endpoint += "&since_id=" + sinceID
+	}
+
+	opts.Method = "GET"
+	opts.Endpoint = endpoint
+	opts.Data = ""
+
+	return client.SendRequest(opts)
+}
+
+// ReadPostWithMedia fetches a single post with media expansions.
+func ReadPostWithMedia(client Client, postID string, opts RequestOptions) (json.RawMessage, error) {
+	postID = ResolvePostID(postID)
+
+	opts.Method = "GET"
+	opts.Endpoint = fmt.Sprintf(
+		"/2/tweets/%s?tweet.fields=created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets,entities,attachments"+
+			"&expansions=author_id,attachments.media_keys,referenced_tweets.id"+
+			"&media.fields=url,preview_image_url,type"+
+			"&user.fields=username,name",
+		postID,
+	)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
