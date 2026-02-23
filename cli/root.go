@@ -121,6 +121,7 @@ Run 'xurl --help' to see all available commands.`,
 	rootCmd.AddCommand(CreateMediaCommand(a))
 	rootCmd.AddCommand(CreateVersionCommand())
 	rootCmd.AddCommand(CreateWebhookCommand(a))
+	rootCmd.AddCommand(CreateBotCommand(a))
 
 	// Register streamlined shortcut commands (post, reply, read, search, etc.)
 	CreateShortcutCommands(rootCmd, a)
