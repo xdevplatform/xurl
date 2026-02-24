@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xdevplatform/xurl/auth"
 	"github.com/xdevplatform/xurl/config"
@@ -355,4 +356,82 @@ func TestStreamRequest(t *testing.T) {
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAPIError(err), "Expected API error")
 	})
+}
+
+// futureExpiry returns a unix timestamp 1 hour in the future.
+func futureExpiry() uint64 {
+	return uint64(time.Now().Add(time.Hour).Unix())
+}
+
+// TC 5.3: ApiClient with multi-app Auth; app-b only has Bearer → BuildRequest uses app-b's Bearer
+func TestTC5_3_ApiClientUsesAppBBearerNotDefaultOAuth2(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl_api_multiapp_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	tempFile := filepath.Join(tempDir, ".xurl")
+	ts := &store.TokenStore{
+		Apps:       make(map[string]*store.App),
+		DefaultApp: "app-a",
+		FilePath:   tempFile,
+	}
+
+	// app-a: has OAuth2 (default/active for auto-selection cascade)
+	ts.Apps["app-a"] = &store.App{
+		ClientID:     "id-a",
+		ClientSecret: "secret-a",
+		DefaultUser:  "alice-a",
+		OAuth2Tokens: map[string]store.Token{
+			"alice-a": {
+				Type: store.OAuth2TokenType,
+				OAuth2: &store.OAuth2Token{
+					AccessToken:    "oauth2-token-alice-a",
+					RefreshToken:   "refresh-alice-a",
+					ExpirationTime: futureExpiry(),
+				},
+			},
+		},
+		BearerToken: &store.Token{
+			Type:   store.BearerTokenType,
+			Bearer: "bearer-a",
+		},
+	}
+
+	// app-b: has ONLY Bearer token, no OAuth2
+	ts.Apps["app-b"] = &store.App{
+		ClientID:     "id-b",
+		ClientSecret: "secret-b",
+		OAuth2Tokens: make(map[string]store.Token),
+		BearerToken: &store.Token{
+			Type:   store.BearerTokenType,
+			Bearer: "bearer-b-only",
+		},
+	}
+
+	// Build Auth starting with app-a credentials
+	a := auth.NewAuth(&config.Config{
+		ClientID:     "id-a",
+		ClientSecret: "secret-a",
+		APIBaseURL:   "https://api.x.com",
+		AuthURL:      "https://x.com/i/oauth2/authorize",
+		TokenURL:     "https://api.x.com/2/oauth2/token",
+		RedirectURI:  "http://localhost:8080/callback",
+		InfoURL:      "https://api.x.com/2/users/me",
+	}).WithTokenStore(ts)
+
+	// Switch to app-b
+	a.WithAppName("app-b")
+
+	cfg := &config.Config{APIBaseURL: "https://api.x.com"}
+	client := NewApiClient(cfg, a)
+
+	req, err := client.BuildRequest(RequestOptions{
+		Method:   "GET",
+		Endpoint: "/2/users/me",
+	})
+	require.NoError(t, err)
+
+	authHeader := req.Header.Get("Authorization")
+	assert.Equal(t, "Bearer bearer-b-only", authHeader,
+		"Authorization header must use app-b's Bearer token, not app-a's OAuth2")
 }

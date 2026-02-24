@@ -82,19 +82,20 @@ func (a *Auth) WithAppName(appName string) *Auth {
 	a.appName = appName
 	app := a.TokenStore.ResolveApp(appName)
 	if app != nil {
-		if a.clientID == "" {
-			a.clientID = app.ClientID
-		}
-		if a.clientSecret == "" {
-			a.clientSecret = app.ClientSecret
-		}
+		a.clientID = app.ClientID         // unconditional override
+		a.clientSecret = app.ClientSecret // unconditional override
 	}
 	return a
 }
 
+// AppName returns the current explicit app name override.
+func (a *Auth) AppName() string {
+	return a.appName
+}
+
 // GetOAuth1Header gets the OAuth1 header for a request
 func (a *Auth) GetOAuth1Header(method, urlStr string, additionalParams map[string]string) (string, error) {
-	token := a.TokenStore.GetOAuth1Tokens()
+	token := a.TokenStore.GetOAuth1TokensForApp(a.appName)
 	if token == nil || token.OAuth1 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("OAuth1 token not found"))
 	}
@@ -141,14 +142,14 @@ func (a *Auth) GetOAuth1Header(method, urlStr string, additionalParams map[strin
 	return "OAuth " + strings.Join(oauthParams, ", "), nil
 }
 
-// GetOAuth2Token gets or refreshes an OAuth2 token
+// GetOAuth2Header gets or refreshes an OAuth2 token
 func (a *Auth) GetOAuth2Header(username string) (string, error) {
 	var token *store.Token
 
 	if username != "" {
-		token = a.TokenStore.GetOAuth2Token(username)
+		token = a.TokenStore.GetOAuth2TokenForApp(a.appName, username)
 	} else {
-		token = a.TokenStore.GetFirstOAuth2Token()
+		token = a.TokenStore.GetFirstOAuth2TokenForApp(a.appName)
 	}
 
 	if token == nil {
@@ -253,7 +254,7 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 
 	expirationTime := uint64(time.Now().Add(time.Duration(token.Expiry.Unix()-time.Now().Unix()) * time.Second).Unix())
 
-	err = a.TokenStore.SaveOAuth2Token(usernameStr, token.AccessToken, token.RefreshToken, expirationTime)
+	err = a.TokenStore.SaveOAuth2TokenForApp(a.appName, usernameStr, token.AccessToken, token.RefreshToken, expirationTime)
 	if err != nil {
 		return "", xurlErrors.NewAuthError("TokenStorageError", err)
 	}
@@ -266,9 +267,9 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 	var token *store.Token
 
 	if username != "" {
-		token = a.TokenStore.GetOAuth2Token(username)
+		token = a.TokenStore.GetOAuth2TokenForApp(a.appName, username)
 	} else {
-		token = a.TokenStore.GetFirstOAuth2Token()
+		token = a.TokenStore.GetFirstOAuth2TokenForApp(a.appName)
 	}
 
 	if token == nil || token.OAuth2 == nil {
@@ -310,7 +311,7 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 
 	expirationTime := uint64(time.Now().Add(time.Duration(newToken.Expiry.Unix()-time.Now().Unix()) * time.Second).Unix())
 
-	err = a.TokenStore.SaveOAuth2Token(usernameStr, newToken.AccessToken, newToken.RefreshToken, expirationTime)
+	err = a.TokenStore.SaveOAuth2TokenForApp(a.appName, usernameStr, newToken.AccessToken, newToken.RefreshToken, expirationTime)
 	if err != nil {
 		return "", xurlErrors.NewAuthError("RefreshTokenError", err)
 	}
@@ -320,7 +321,7 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 
 // GetBearerTokenHeader gets the bearer token from the token store
 func (a *Auth) GetBearerTokenHeader() (string, error) {
-	token := a.TokenStore.GetBearerToken()
+	token := a.TokenStore.GetBearerTokenForApp(a.appName)
 	if token == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("bearer token not found"))
 	}
