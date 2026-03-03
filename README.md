@@ -33,7 +33,23 @@ Installs to `~/.local/bin`. If it's not in your PATH, the script will tell you w
 
 ### Go
 ```bash
-go install github.com/xdevplatform/xurl@latest
+go install github.com/xdevplatform/xurl/cmd/xurl@latest
+```
+
+### Use as a Go library
+
+Import by module path in other Go projects:
+
+```go
+import "github.com/xdevplatform/xurl"
+```
+
+If your consuming project uses a local checkout of this repo, you can use a `replace` directive in your `go.mod` while still importing by the full module path:
+
+```go
+require github.com/xdevplatform/xurl v0.0.0
+
+replace github.com/xdevplatform/xurl => ../xurl
 ```
 
 
