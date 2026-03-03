@@ -1,19 +1,19 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"bufio"
-	"mime/multipart"
-	"os"
-	"path/filepath"
 	"github.com/xdevplatform/xurl/auth"
 	"github.com/xdevplatform/xurl/config"
 	xurlErrors "github.com/xdevplatform/xurl/errors"
@@ -346,7 +346,8 @@ func (c *ApiClient) getAuthHeader(method, url string, authType string, username 
 	}
 
 	// If no auth type is specified, try to use the first OAuth2 token
-	token := c.auth.TokenStore.GetFirstOAuth2Token()
+	// Use ForApp variants so the active app name (set via --app) is respected.
+	token := c.auth.TokenStore.GetFirstOAuth2TokenForApp(c.auth.AppName())
 	if token != nil {
 		accessToken, err := c.auth.GetOAuth2Header(username)
 		if err == nil {
@@ -355,7 +356,7 @@ func (c *ApiClient) getAuthHeader(method, url string, authType string, username 
 	}
 
 	// If no OAuth2 token is available, try to use the first OAuth1 token
-	token = c.auth.TokenStore.GetOAuth1Tokens()
+	token = c.auth.TokenStore.GetOAuth1TokensForApp(c.auth.AppName())
 	if token != nil {
 		authHeader, err := c.auth.GetOAuth1Header(method, url, nil)
 		if err == nil {
