@@ -140,6 +140,14 @@ xurl read https://x.com/user/status/1234567890
 xurl search "golang"
 xurl search "from:elonmusk" -n 20
 xurl search "#buildinpublic lang:en" -n 15
+
+# Search with pagination / incremental polling
+xurl search "from:elonmusk" -n 100 --since-id 1234567890
+xurl search "crypto" --start-time 2025-01-01T00:00:00Z -n 50
+xurl search "AI" --next-token TOKEN_FROM_PREVIOUS_RESPONSE
+
+# Override default fields / expansions
+xurl search "golang" --tweet-fields created_at,public_metrics,author_id --user-fields username,name --expansions author_id
 ```
 
 ### User Info
@@ -160,9 +168,20 @@ xurl user @XDevelopers
 xurl timeline
 xurl timeline -n 25
 
+# Timeline with pagination / filtering
+xurl timeline --since-id 1234567890 -n 50
+xurl timeline --exclude replies,retweets
+xurl timeline --start-time 2025-01-01T00:00:00Z -n 100
+xurl timeline --next-token TOKEN_FROM_PREVIOUS_RESPONSE
+
 # Your mentions
 xurl mentions
 xurl mentions -n 20
+
+# Mentions with incremental polling
+xurl mentions --since-id 1234567890 -n 50
+xurl mentions --start-time 2025-03-01T00:00:00Z
+xurl mentions --next-token TOKEN_FROM_PREVIOUS_RESPONSE
 ```
 
 ### Engagement
@@ -238,6 +257,24 @@ xurl media status --wait MEDIA_ID    # poll until done
 xurl media upload meme.png           # response includes media id
 xurl post "lol" --media-id MEDIA_ID
 ```
+
+---
+
+## Pagination & Polling Flags
+
+The `search`, `timeline`, and `mentions` commands accept these optional flags for incremental polling and field customisation:
+
+| Flag | Applies to | Description |
+|---|---|---|
+| `--since-id ID` | search, timeline, mentions | Only return results with a tweet ID greater than this (exclusive). Ideal for incremental polling. |
+| `--until-id ID` | search, timeline, mentions | Only return results with a tweet ID less than this (exclusive). |
+| `--start-time TIME` | search, timeline, mentions | Oldest UTC datetime, ISO 8601 format (`YYYY-MM-DDTHH:mm:ssZ`). |
+| `--end-time TIME` | search, timeline, mentions | Newest UTC datetime, ISO 8601 format. |
+| `--next-token TOKEN` | search, timeline, mentions | Pagination token from a previous response's `meta.next_token`. |
+| `--tweet-fields FIELDS` | search, timeline, mentions | Comma-separated tweet fields (overrides defaults: `created_at,public_metrics,conversation_id,entities`). |
+| `--user-fields FIELDS` | search, timeline, mentions | Comma-separated user fields (overrides defaults: `username,name,verified`). |
+| `--expansions FIELDS` | search, timeline, mentions | Comma-separated expansions (overrides default: `author_id`). |
+| `--exclude TYPES` | timeline only | Comma-separated exclusions: `replies`, `retweets`, or both. |
 
 ---
 

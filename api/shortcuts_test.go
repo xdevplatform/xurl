@@ -228,7 +228,7 @@ func TestSearchPosts(t *testing.T) {
 	defer server.Close()
 	client := shortcutClient(t, server)
 
-	resp, err := SearchPosts(client, "golang", 10, baseTestOpts())
+	resp, err := SearchPosts(client, "golang", 10, PaginationOptions{}, baseTestOpts())
 	require.NoError(t, err)
 
 	var result struct {
