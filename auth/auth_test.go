@@ -1,9 +1,13 @@
 package auth
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -209,6 +213,89 @@ func TestWithAppName(t *testing.T) {
 	assert.Equal(t, "other-secret", a.clientSecret)
 }
 
+func TestWithAppNameOverridesEnvCredentials(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl_auth_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("HOME", tempDir)
+
+	tokenStore, tsDir := createTempTokenStore(t)
+	defer os.RemoveAll(tsDir)
+	tokenStore.AddApp("my-app", "app-id", "app-secret")
+
+	// Simulate env vars being set at startup
+	cfg := &config.Config{ClientID: "env-id", ClientSecret: "env-secret"}
+	a := NewAuth(cfg).WithTokenStore(tokenStore)
+	assert.Equal(t, "env-id", a.clientID)
+
+	// --app override should replace env-var credentials with the named app's
+	a.WithAppName("my-app")
+	assert.Equal(t, "app-id", a.clientID)
+	assert.Equal(t, "app-secret", a.clientSecret)
+}
+
+func TestAppFlagTokenIsolation(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl_auth_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("HOME", tempDir)
+
+	tokenStore, tsDir := createTempTokenStore(t)
+	defer os.RemoveAll(tsDir)
+
+	tokenStore.AddApp("app-a", "id-a", "secret-a")
+	tokenStore.AddApp("app-b", "id-b", "secret-b")
+
+	// Save a bearer token only in app-a
+	tokenStore.SaveBearerTokenForApp("app-a", "bearer-for-a")
+
+	// Save OAuth1 tokens only in app-b
+	tokenStore.SaveOAuth1TokensForApp("app-b", "at-b", "ts-b", "ck-b", "cs-b")
+
+	// Save OAuth2 token only in app-a
+	tokenStore.SaveOAuth2TokenForApp("app-a", "alice", "oauth2-for-a", "refresh-a", 9999999999)
+
+	t.Run("Bearer token from named app", func(t *testing.T) {
+		cfg := &config.Config{}
+		a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("app-a")
+		header, err := a.GetBearerTokenHeader()
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer bearer-for-a", header)
+	})
+
+	t.Run("Bearer token not found in other app", func(t *testing.T) {
+		cfg := &config.Config{}
+		a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("app-b")
+		_, err := a.GetBearerTokenHeader()
+		assert.Error(t, err, "app-b has no bearer token, expected error")
+	})
+
+	t.Run("OAuth1 header from named app", func(t *testing.T) {
+		cfg := &config.Config{}
+		a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("app-b")
+		header, err := a.GetOAuth1Header("GET", "https://api.x.com/2/users/me", nil)
+		require.NoError(t, err)
+		assert.Contains(t, header, "OAuth ")
+	})
+
+	t.Run("OAuth1 not found in other app", func(t *testing.T) {
+		cfg := &config.Config{}
+		a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("app-a")
+		_, err := a.GetOAuth1Header("GET", "https://api.x.com/2/users/me", nil)
+		assert.Error(t, err, "app-a has no OAuth1 token, expected error")
+	})
+
+	t.Run("Default app used when no --app flag", func(t *testing.T) {
+		tokenStore.SetDefaultApp("app-a")
+		cfg := &config.Config{}
+		// No WithAppName call — appName stays ""
+		a := NewAuth(cfg).WithTokenStore(tokenStore)
+		header, err := a.GetBearerTokenHeader()
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer bearer-for-a", header)
+	})
+}
+
 func TestWithAppNameNonexistent(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "xurl_auth_test")
 	require.NoError(t, err)
@@ -263,4 +350,76 @@ func TestGetOAuth2HeaderNoToken(t *testing.T) {
 	// Verify that looking up a nonexistent user returns nil
 	token := tokenStore.GetOAuth2Token("nobody")
 	assert.Nil(t, token)
+}
+
+// mockTokenServer returns an httptest.Server that responds to token refresh
+// requests with a new access token.
+func mockTokenServer(t *testing.T, accessToken, refreshToken string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token":  accessToken,
+			"token_type":    "Bearer",
+			"expires_in":    3600,
+			"refresh_token": refreshToken,
+		})
+	}))
+}
+
+func TestRefreshOAuth2TokenSavesToNamedApp(t *testing.T) {
+	server := mockTokenServer(t, "new-access-token", "new-refresh-token")
+	defer server.Close()
+
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+
+	tokenStore.AddApp("my-app", "client-id", "client-secret")
+
+	// Save an already-expired token to "my-app"
+	expiredTime := uint64(time.Now().Add(-1 * time.Hour).Unix())
+	tokenStore.SaveOAuth2TokenForApp("my-app", "alice", "old-access", "old-refresh", expiredTime)
+
+	cfg := &config.Config{TokenURL: server.URL + "/token"}
+	a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("my-app")
+
+	newToken, err := a.RefreshOAuth2Token("alice")
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", newToken)
+
+	// Refreshed token must be saved to "my-app", not the default app
+	tok := tokenStore.GetOAuth2TokenForApp("my-app", "alice")
+	require.NotNil(t, tok)
+	assert.Equal(t, "new-access-token", tok.OAuth2.AccessToken)
+
+	// Default app must not have received the token
+	assert.Nil(t, tokenStore.GetOAuth2TokenForApp("default", "alice"))
+}
+
+func TestRefreshOAuth2TokenSavesToDefaultAppWhenNoOverride(t *testing.T) {
+	server := mockTokenServer(t, "new-access-token", "new-refresh-token")
+	defer server.Close()
+
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+
+	tokenStore.Apps["default"].ClientID = "client-id"
+	tokenStore.Apps["default"].ClientSecret = "client-secret"
+
+	// Save an expired token to the default app
+	expiredTime := uint64(time.Now().Add(-1 * time.Hour).Unix())
+	tokenStore.SaveOAuth2TokenForApp("default", "bob", "old-access", "old-refresh", expiredTime)
+
+	cfg := &config.Config{TokenURL: server.URL + "/token"}
+	// No WithAppName — appName stays ""
+	a := NewAuth(cfg).WithTokenStore(tokenStore)
+
+	newToken, err := a.RefreshOAuth2Token("bob")
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", newToken)
+
+	// Token must be saved back to the default app
+	tok := tokenStore.GetOAuth2TokenForApp("default", "bob")
+	require.NotNil(t, tok)
+	assert.Equal(t, "new-access-token", tok.OAuth2.AccessToken)
 }

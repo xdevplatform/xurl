@@ -306,6 +306,40 @@ func TestGetAuthHeader(t *testing.T) {
 		assert.Error(t, err, "Expected an error")
 		assert.True(t, xurlErrors.IsAuthError(err), "Expected auth error")
 	})
+
+	t.Run("Auto-detect uses named app bearer token when --app is set", func(t *testing.T) {
+		tokenStore, tempDir := createTempTokenStore(t)
+		defer os.RemoveAll(tempDir)
+
+		tokenStore.AddApp("my-app", "id", "secret")
+		// Bearer token only in my-app, not in default
+		tokenStore.SaveBearerTokenForApp("my-app", "bearer-my-app")
+
+		a := auth.NewAuth(&config.Config{}).WithTokenStore(tokenStore).WithAppName("my-app")
+		client := NewApiClient(cfg, a)
+
+		header, err := client.getAuthHeader("GET", "https://api.x.com/2/users/me", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer bearer-my-app", header)
+	})
+
+	t.Run("Auto-detect falls back to default app when no --app flag", func(t *testing.T) {
+		tokenStore, tempDir := createTempTokenStore(t)
+		defer os.RemoveAll(tempDir)
+
+		tokenStore.AddApp("other-app", "id", "secret")
+		// Bearer token only in default app
+		tokenStore.SaveBearerTokenForApp("default", "bearer-default")
+		tokenStore.SaveBearerTokenForApp("other-app", "bearer-other")
+
+		// No WithAppName — should use default
+		a := auth.NewAuth(&config.Config{}).WithTokenStore(tokenStore)
+		client := NewApiClient(cfg, a)
+
+		header, err := client.getAuthHeader("GET", "https://api.x.com/2/users/me", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer bearer-default", header)
+	})
 }
 
 func TestStreamRequest(t *testing.T) {
