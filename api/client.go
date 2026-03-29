@@ -346,7 +346,9 @@ func (c *ApiClient) getAuthHeader(method, url string, authType string, username 
 	}
 
 	// If no auth type is specified, try to use the first OAuth2 token
-	token := c.auth.TokenStore.GetFirstOAuth2Token()
+	// Use ForApp variants so the active app name (set via --app) is respected.
+	// -dr. Q
+	token := c.auth.TokenStore.GetFirstOAuth2TokenForApp(c.auth.AppName())
 	if token != nil {
 		accessToken, err := c.auth.GetOAuth2Header(username)
 		if err == nil {
