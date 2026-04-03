@@ -337,7 +337,7 @@ func (s *TokenStore) importFromTwurlrc(filePath string) error {
 	}
 
 	if err := yaml.Unmarshal(data, &twurlConfig); err != nil {
-		return errors.NewJSONError(err)
+		return errors.NewYAMLError(err)
 	}
 
 	app := s.activeAppOrCreate()
