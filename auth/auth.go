@@ -421,7 +421,7 @@ func generateCodeVerifierAndChallenge() (string, string) {
 }
 
 func getOAuth2Scopes() []string {
-	readScopes := []string{
+	return []string{
 		"tweet.read",
 		"users.read",
 		"bookmark.read",
@@ -430,34 +430,9 @@ func getOAuth2Scopes() []string {
 		"block.read",
 		"mute.read",
 		"like.read",
-		"users.email",
-		"dm.read",
-	}
-
-	writeScopes := []string{
-		"tweet.write",
-		"tweet.moderate.write",
-		"follows.write",
-		"bookmark.write",
-		"block.write",
-		"mute.write",
-		"like.write",
-		"list.write",
-		"media.write",
-		"dm.write",
-	}
-
-	otherScopes := []string{
-		"offline.access",
 		"space.read",
+		"offline.access",
 	}
-
-	var scopes []string
-	scopes = append(scopes, readScopes...)
-	scopes = append(scopes, writeScopes...)
-	scopes = append(scopes, otherScopes...)
-
-	return scopes
 }
 
 func openBrowser(url string) error {
