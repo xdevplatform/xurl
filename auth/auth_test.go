@@ -264,3 +264,28 @@ func TestGetOAuth2HeaderNoToken(t *testing.T) {
 	token := tokenStore.GetOAuth2Token("nobody")
 	assert.Nil(t, token)
 }
+
+func TestBrowserLaunchCommand(t *testing.T) {
+	url := "https://x.com/i/oauth2/authorize?client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback&response_type=code&scope=tweet.read+users.read&state=123&code_challenge=xyz&code_challenge_method=S256"
+
+	t.Run("windows keeps the full oauth url as a single argument", func(t *testing.T) {
+		cmd, args := browserLaunchCommand("windows", url)
+
+		assert.Equal(t, "rundll32", cmd)
+		assert.Equal(t, []string{"url.dll,FileProtocolHandler", url}, args)
+	})
+
+	t.Run("darwin uses open", func(t *testing.T) {
+		cmd, args := browserLaunchCommand("darwin", url)
+
+		assert.Equal(t, "open", cmd)
+		assert.Equal(t, []string{url}, args)
+	})
+
+	t.Run("linux uses xdg-open", func(t *testing.T) {
+		cmd, args := browserLaunchCommand("linux", url)
+
+		assert.Equal(t, "xdg-open", cmd)
+		assert.Equal(t, []string{url}, args)
+	})
+}
