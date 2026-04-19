@@ -184,7 +184,7 @@ Streaming endpoints (like `/2/tweets/search/stream`) are automatically detected 
 - `/2/tweets/search/stream`
 - `/2/tweets/sample/stream`
 - `/2/tweets/sample10/stream`
-- `/2/tweets/firehose/strea/lang/en`
+- `/2/tweets/firehose/stream/lang/en`
 - `/2/tweets/firehose/stream/lang/ja`
 - `/2/tweets/firehose/stream/lang/ko`
 - `/2/tweets/firehose/stream/lang/pt`
