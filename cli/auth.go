@@ -56,10 +56,15 @@ func createAuthBearerCmd(a *auth.Auth) *cobra.Command {
 
 func createAuthOAuth2Cmd(a *auth.Auth) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "oauth2",
+		Use:   "oauth2 [USERNAME]",
 		Short: "Configure OAuth2 authentication",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			_, err := a.OAuth2Flow("")
+			username := ""
+			if len(args) > 0 {
+				username = args[0]
+			}
+			_, err := a.OAuth2Flow(username)
 			if err != nil {
 				fmt.Println("OAuth2 authentication failed:", err)
 				os.Exit(1)

@@ -352,6 +352,7 @@ func TestGetOAuth2HeaderNoToken(t *testing.T) {
 	assert.Nil(t, token)
 }
 
+
 // mockTokenServer returns an httptest.Server that responds to token refresh
 // requests with a new access token.
 func mockTokenServer(t *testing.T, accessToken, refreshToken string) *httptest.Server {
@@ -422,4 +423,29 @@ func TestRefreshOAuth2TokenSavesToDefaultAppWhenNoOverride(t *testing.T) {
 	tok := tokenStore.GetOAuth2TokenForApp("default", "bob")
 	require.NotNil(t, tok)
 	assert.Equal(t, "new-access-token", tok.OAuth2.AccessToken)
+}
+
+func TestBrowserLaunchCommand(t *testing.T) {
+	url := "https://x.com/i/oauth2/authorize?client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback&response_type=code&scope=tweet.read+users.read&state=123&code_challenge=xyz&code_challenge_method=S256"
+
+	t.Run("windows keeps the full oauth url as a single argument", func(t *testing.T) {
+		cmd, args := browserLaunchCommand("windows", url)
+
+		assert.Equal(t, "rundll32", cmd)
+		assert.Equal(t, []string{"url.dll,FileProtocolHandler", url}, args)
+	})
+
+	t.Run("darwin uses open", func(t *testing.T) {
+		cmd, args := browserLaunchCommand("darwin", url)
+
+		assert.Equal(t, "open", cmd)
+		assert.Equal(t, []string{url}, args)
+	})
+
+	t.Run("linux uses xdg-open", func(t *testing.T) {
+		cmd, args := browserLaunchCommand("linux", url)
+
+		assert.Equal(t, "xdg-open", cmd)
+		assert.Equal(t, []string{url}, args)
+	})
 }
