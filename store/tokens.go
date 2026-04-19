@@ -83,6 +83,20 @@ type TokenStore struct {
 	FilePath   string          `yaml:"-"`
 }
 
+func resolveHomeDir() string {
+	if homeDir := os.Getenv("HOME"); homeDir != "" {
+		return homeDir
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("Error getting home directory:", err)
+		return "."
+	}
+
+	return homeDir
+}
+
 // Creates a new TokenStore, loading from ~/.xurl (auto-migrating legacy JSON).
 func NewTokenStore() *TokenStore {
 	return NewTokenStoreWithCredentials("", "")
@@ -92,12 +106,7 @@ func NewTokenStore() *TokenStore {
 // client credentials into any app that was migrated without them (i.e. legacy
 // JSON migration where CLIENT_ID / CLIENT_SECRET came from env vars).
 func NewTokenStoreWithCredentials(clientID, clientSecret string) *TokenStore {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Println("Error getting home directory:", err)
-		homeDir = "."
-	}
-
+	homeDir := resolveHomeDir()
 	filePath := filepath.Join(homeDir, ".xurl")
 
 	store := &TokenStore{
