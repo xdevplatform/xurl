@@ -200,6 +200,8 @@ func TestWithAppName(t *testing.T) {
 
 	// Add a second app with different credentials
 	tokenStore.AddApp("other", "other-id", "other-secret")
+	err = tokenStore.SetAppRedirectURI("other", "http://localhost:9090/callback")
+	require.NoError(t, err)
 
 	cfg := &config.Config{}
 	a := NewAuth(cfg).WithTokenStore(tokenStore)
@@ -211,6 +213,7 @@ func TestWithAppName(t *testing.T) {
 	a.WithAppName("other")
 	assert.Equal(t, "other-id", a.clientID)
 	assert.Equal(t, "other-secret", a.clientSecret)
+	assert.Equal(t, "http://localhost:9090/callback", a.redirectURI)
 }
 
 func TestWithAppNameOverridesEnvCredentials(t *testing.T) {
@@ -222,9 +225,16 @@ func TestWithAppNameOverridesEnvCredentials(t *testing.T) {
 	tokenStore, tsDir := createTempTokenStore(t)
 	defer os.RemoveAll(tsDir)
 	tokenStore.AddApp("my-app", "app-id", "app-secret")
+	err = tokenStore.SetAppRedirectURI("my-app", "http://localhost:9090/callback")
+	require.NoError(t, err)
 
 	// Simulate env vars being set at startup
-	cfg := &config.Config{ClientID: "env-id", ClientSecret: "env-secret"}
+	cfg := &config.Config{
+		ClientID:           "env-id",
+		ClientSecret:       "env-secret",
+		RedirectURI:        "http://127.0.0.1:7777/callback",
+		RedirectURIFromEnv: true,
+	}
 	a := NewAuth(cfg).WithTokenStore(tokenStore)
 	assert.Equal(t, "env-id", a.clientID)
 
@@ -232,6 +242,7 @@ func TestWithAppNameOverridesEnvCredentials(t *testing.T) {
 	a.WithAppName("my-app")
 	assert.Equal(t, "app-id", a.clientID)
 	assert.Equal(t, "app-secret", a.clientSecret)
+	assert.Equal(t, "http://127.0.0.1:7777/callback", a.redirectURI)
 }
 
 func TestAppFlagTokenIsolation(t *testing.T) {
@@ -352,7 +363,6 @@ func TestGetOAuth2HeaderNoToken(t *testing.T) {
 	assert.Nil(t, token)
 }
 
-
 // mockTokenServer returns an httptest.Server that responds to token refresh
 // requests with a new access token.
 func mockTokenServer(t *testing.T, accessToken, refreshToken string) *httptest.Server {
@@ -448,4 +458,117 @@ func TestBrowserLaunchCommand(t *testing.T) {
 		assert.Equal(t, "xdg-open", cmd)
 		assert.Equal(t, []string{url}, args)
 	})
+}
+
+func TestListenerConfigFromRedirectURI(t *testing.T) {
+	testCases := []struct {
+		name          string
+		redirectURI   string
+		wantAddresses []string
+		wantCallback  string
+	}{
+		{
+			name:          "localhost redirect listens on both loopback families",
+			redirectURI:   "http://localhost:8080/callback",
+			wantAddresses: []string{"127.0.0.1:8080", "[::1]:8080"},
+			wantCallback:  "/callback",
+		},
+		{
+			name:          "ipv4 loopback redirect uses configured host and port",
+			redirectURI:   "http://127.0.0.1:9090/oauth/callback",
+			wantAddresses: []string{"127.0.0.1:9090"},
+			wantCallback:  "/oauth/callback",
+		},
+		{
+			name:          "missing host and port fall back safely",
+			redirectURI:   "/callback",
+			wantAddresses: []string{"127.0.0.1:8080", "[::1]:8080"},
+			wantCallback:  "/callback",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := listenerConfigFromRedirectURI(tc.redirectURI)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantAddresses, config.Addresses)
+			assert.Equal(t, tc.wantCallback, config.CallbackPath)
+		})
+	}
+}
+
+func TestRefreshOAuth2TokenPreservesUnnamedTokenWhenUsernameLookupFails(t *testing.T) {
+	tokenServer := mockTokenServer(t, "new-access-token", "new-refresh-token")
+	defer tokenServer.Close()
+
+	infoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{},
+		})
+	}))
+	defer infoServer.Close()
+
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+
+	expiredTime := uint64(time.Now().Add(-1 * time.Hour).Unix())
+	err := tokenStore.SaveOAuth2TokenForApp("default", "", "old-access", "old-refresh", expiredTime)
+	require.NoError(t, err)
+
+	cfg := &config.Config{
+		TokenURL: serverURL(tokenServer, "/token"),
+		InfoURL:  infoServer.URL,
+	}
+	a := NewAuth(cfg).WithTokenStore(tokenStore)
+
+	newToken, err := a.RefreshOAuth2Token("")
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", newToken)
+
+	tok := tokenStore.GetOAuth2TokenForApp("default", "")
+	require.NotNil(t, tok)
+	assert.Equal(t, "new-access-token", tok.OAuth2.AccessToken)
+	assert.Nil(t, tokenStore.GetOAuth2TokenForApp("default", "alice"))
+}
+
+func TestRefreshOAuth2TokenMigratesUnnamedTokenWhenUsernameLookupSucceeds(t *testing.T) {
+	tokenServer := mockTokenServer(t, "new-access-token", "new-refresh-token")
+	defer tokenServer.Close()
+
+	infoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"username": "alice",
+			},
+		})
+	}))
+	defer infoServer.Close()
+
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+
+	expiredTime := uint64(time.Now().Add(-1 * time.Hour).Unix())
+	err := tokenStore.SaveOAuth2TokenForApp("default", "", "old-access", "old-refresh", expiredTime)
+	require.NoError(t, err)
+
+	cfg := &config.Config{
+		TokenURL: serverURL(tokenServer, "/token"),
+		InfoURL:  infoServer.URL,
+	}
+	a := NewAuth(cfg).WithTokenStore(tokenStore)
+
+	newToken, err := a.RefreshOAuth2Token("")
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", newToken)
+
+	assert.Nil(t, tokenStore.GetOAuth2TokenForApp("default", ""))
+	tok := tokenStore.GetOAuth2TokenForApp("default", "alice")
+	require.NotNil(t, tok)
+	assert.Equal(t, "new-access-token", tok.OAuth2.AccessToken)
+}
+
+func serverURL(server *httptest.Server, suffix string) string {
+	return server.URL + suffix
 }
