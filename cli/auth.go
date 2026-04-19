@@ -37,7 +37,7 @@ func createAuthBearerCmd(a *auth.Auth) *cobra.Command {
 		Use:   "app",
 		Short: "Configure app-auth (bearer token)",
 		Run: func(cmd *cobra.Command, args []string) {
-			err := a.TokenStore.SaveBearerToken(bearerToken)
+			err := a.TokenStore.SaveBearerTokenForApp(a.AppName(), bearerToken)
 			if err != nil {
 				fmt.Println("Error saving bearer token:", err)
 				os.Exit(1)
@@ -85,7 +85,7 @@ func createAuthOAuth1Cmd(a *auth.Auth) *cobra.Command {
 		Use:   "oauth1",
 		Short: "Configure OAuth1 authentication",
 		Run: func(cmd *cobra.Command, args []string) {
-			err := a.TokenStore.SaveOAuth1Tokens(accessToken, tokenSecret, consumerKey, consumerSecret)
+			err := a.TokenStore.SaveOAuth1TokensForApp(a.AppName(), accessToken, tokenSecret, consumerKey, consumerSecret)
 			if err != nil {
 				fmt.Println("Error saving OAuth1 tokens:", err)
 				os.Exit(1)
@@ -187,28 +187,28 @@ func createAuthClearCmd(a *auth.Auth) *cobra.Command {
 		Short: "Clear authentication tokens",
 		Run: func(cmd *cobra.Command, args []string) {
 			if all {
-				err := a.TokenStore.ClearAll()
+				err := a.TokenStore.ClearAllForApp(a.AppName())
 				if err != nil {
 					fmt.Println("Error clearing all tokens:", err)
 					os.Exit(1)
 				}
 				fmt.Println("All authentication cleared!")
 			} else if oauth1 {
-				err := a.TokenStore.ClearOAuth1Tokens()
+				err := a.TokenStore.ClearOAuth1TokensForApp(a.AppName())
 				if err != nil {
 					fmt.Println("Error clearing OAuth1 tokens:", err)
 					os.Exit(1)
 				}
 				fmt.Println("OAuth1 tokens cleared!")
 			} else if oauth2Username != "" {
-				err := a.TokenStore.ClearOAuth2Token(oauth2Username)
+				err := a.TokenStore.ClearOAuth2TokenForApp(a.AppName(), oauth2Username)
 				if err != nil {
 					fmt.Println("Error clearing OAuth2 token:", err)
 					os.Exit(1)
 				}
 				fmt.Println("OAuth2 token cleared for", oauth2Username+"!")
 			} else if bearer {
-				err := a.TokenStore.ClearBearerToken()
+				err := a.TokenStore.ClearBearerTokenForApp(a.AppName())
 				if err != nil {
 					fmt.Println("Error clearing bearer token:", err)
 					os.Exit(1)

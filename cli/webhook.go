@@ -48,7 +48,7 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 				os.Exit(1)
 			}
 
-			oauth1Token := authInstance.TokenStore.GetOAuth1Tokens()
+			oauth1Token := authInstance.TokenStore.GetOAuth1TokensForApp(authInstance.AppName())
 			if oauth1Token == nil || oauth1Token.OAuth1 == nil || oauth1Token.OAuth1.ConsumerSecret == "" {
 				color.Red("Error: OAuth 1.0a consumer secret not found. Please configure OAuth 1.0a credentials using 'xurl auth oauth1'.")
 				os.Exit(1)
