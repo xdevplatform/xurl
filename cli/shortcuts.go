@@ -55,9 +55,17 @@ func printResult(resp json.RawMessage, err error) {
 
 // resolveMyUserID calls /2/users/me and returns the authenticated user's ID.
 func resolveMyUserID(client api.Client, opts api.RequestOptions) (string, error) {
+	if opts.Username != "" {
+		userID, err := resolveUserID(client, opts.Username, opts)
+		if err != nil {
+			return "", fmt.Errorf("could not resolve your user ID from --username %q: %w", opts.Username, err)
+		}
+		return userID, nil
+	}
+
 	resp, err := api.GetMe(client, opts)
 	if err != nil {
-		return "", fmt.Errorf("could not resolve your user ID (are you authenticated?): %w", err)
+		return "", fmt.Errorf("could not resolve your user ID (are you authenticated? try --username if /2/users/me is unavailable): %w", err)
 	}
 	var me struct {
 		Data struct {
@@ -291,6 +299,10 @@ Examples:
 		Run: func(cmd *cobra.Command, args []string) {
 			client := newClient(a)
 			opts := baseOpts(cmd)
+			if opts.Username != "" {
+				printResult(api.LookupUser(client, opts.Username, opts))
+				return
+			}
 			printResult(api.GetMe(client, opts))
 		},
 	}
