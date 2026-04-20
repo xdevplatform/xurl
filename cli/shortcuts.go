@@ -262,6 +262,8 @@ Examples:
 
 func searchCmd(a *auth.Auth) *cobra.Command {
 	var maxResults int
+	var sinceID, untilID, startTime, endTime, nextToken string
+	var tweetFields, userFields, expansions string
 	cmd := &cobra.Command{
 		Use:   `search "QUERY"`,
 		Short: "Search recent posts",
@@ -270,15 +272,35 @@ func searchCmd(a *auth.Auth) *cobra.Command {
 Examples:
   xurl search "golang"
   xurl search "from:elonmusk" -n 20
-  xurl search "#buildinpublic" -n 15`,
+  xurl search "#buildinpublic" -n 15
+  xurl search "from:user1 OR from:user2" -n 100 --since-id 1234567890
+  xurl search "crypto" --start-time 2025-01-01T00:00:00Z -n 50`,
 		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			client := newClient(a)
 			opts := baseOpts(cmd)
-			printResult(api.SearchPosts(client, args[0], maxResults, opts))
+			pag := api.PaginationOptions{
+				SinceID:     sinceID,
+				UntilID:     untilID,
+				StartTime:   startTime,
+				EndTime:     endTime,
+				NextToken:   nextToken,
+				TweetFields: tweetFields,
+				UserFields:  userFields,
+				Expansions:  expansions,
+			}
+			printResult(api.SearchPosts(client, args[0], maxResults, pag, opts))
 		},
 	}
 	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (min 10, max 100)")
+	cmd.Flags().StringVar(&sinceID, "since-id", "", "Only return results with an ID greater than this")
+	cmd.Flags().StringVar(&untilID, "until-id", "", "Only return results with an ID less than this")
+	cmd.Flags().StringVar(&startTime, "start-time", "", "Oldest UTC datetime (YYYY-MM-DDTHH:mm:ssZ)")
+	cmd.Flags().StringVar(&endTime, "end-time", "", "Newest UTC datetime (YYYY-MM-DDTHH:mm:ssZ)")
+	cmd.Flags().StringVar(&nextToken, "next-token", "", "Pagination token for next page of results")
+	cmd.Flags().StringVar(&tweetFields, "tweet-fields", "", "Comma-separated tweet fields (overrides defaults)")
+	cmd.Flags().StringVar(&userFields, "user-fields", "", "Comma-separated user fields (overrides defaults)")
+	cmd.Flags().StringVar(&expansions, "expansions", "", "Comma-separated expansions (overrides defaults)")
 	addCommonFlags(cmd)
 	return cmd
 }
@@ -336,6 +358,8 @@ Examples:
 
 func timelineCmd(a *auth.Auth) *cobra.Command {
 	var maxResults int
+	var sinceID, untilID, startTime, endTime, nextToken string
+	var tweetFields, userFields, expansions, exclude string
 	cmd := &cobra.Command{
 		Use:   "timeline",
 		Short: "Show your home timeline",
@@ -343,7 +367,9 @@ func timelineCmd(a *auth.Auth) *cobra.Command {
 
 Examples:
   xurl timeline
-  xurl timeline -n 25`,
+  xurl timeline -n 25
+  xurl timeline --since-id 1234567890 -n 50
+  xurl timeline --exclude replies,retweets`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			client := newClient(a)
@@ -353,16 +379,38 @@ Examples:
 				fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
 				os.Exit(1)
 			}
-			printResult(api.GetTimeline(client, userID, maxResults, opts))
+			pag := api.PaginationOptions{
+				SinceID:     sinceID,
+				UntilID:     untilID,
+				StartTime:   startTime,
+				EndTime:     endTime,
+				NextToken:   nextToken,
+				TweetFields: tweetFields,
+				UserFields:  userFields,
+				Expansions:  expansions,
+				Exclude:     exclude,
+			}
+			printResult(api.GetTimeline(client, userID, maxResults, pag, opts))
 		},
 	}
 	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (1–100)")
+	cmd.Flags().StringVar(&sinceID, "since-id", "", "Only return results with an ID greater than this")
+	cmd.Flags().StringVar(&untilID, "until-id", "", "Only return results with an ID less than this")
+	cmd.Flags().StringVar(&startTime, "start-time", "", "Oldest UTC datetime (YYYY-MM-DDTHH:mm:ssZ)")
+	cmd.Flags().StringVar(&endTime, "end-time", "", "Newest UTC datetime (YYYY-MM-DDTHH:mm:ssZ)")
+	cmd.Flags().StringVar(&nextToken, "next-token", "", "Pagination token for next page of results")
+	cmd.Flags().StringVar(&tweetFields, "tweet-fields", "", "Comma-separated tweet fields (overrides defaults)")
+	cmd.Flags().StringVar(&userFields, "user-fields", "", "Comma-separated user fields (overrides defaults)")
+	cmd.Flags().StringVar(&expansions, "expansions", "", "Comma-separated expansions (overrides defaults)")
+	cmd.Flags().StringVar(&exclude, "exclude", "", "Comma-separated exclusions: replies,retweets")
 	addCommonFlags(cmd)
 	return cmd
 }
 
 func mentionsCmd(a *auth.Auth) *cobra.Command {
 	var maxResults int
+	var sinceID, untilID, startTime, endTime, nextToken string
+	var tweetFields, userFields, expansions string
 	cmd := &cobra.Command{
 		Use:   "mentions",
 		Short: "Show your recent mentions",
@@ -370,7 +418,8 @@ func mentionsCmd(a *auth.Auth) *cobra.Command {
 
 Examples:
   xurl mentions
-  xurl mentions -n 25`,
+  xurl mentions -n 25
+  xurl mentions --since-id 1234567890`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			client := newClient(a)
@@ -380,10 +429,28 @@ Examples:
 				fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
 				os.Exit(1)
 			}
-			printResult(api.GetMentions(client, userID, maxResults, opts))
+			pag := api.PaginationOptions{
+				SinceID:     sinceID,
+				UntilID:     untilID,
+				StartTime:   startTime,
+				EndTime:     endTime,
+				NextToken:   nextToken,
+				TweetFields: tweetFields,
+				UserFields:  userFields,
+				Expansions:  expansions,
+			}
+			printResult(api.GetMentions(client, userID, maxResults, pag, opts))
 		},
 	}
 	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (5–100)")
+	cmd.Flags().StringVar(&sinceID, "since-id", "", "Only return results with an ID greater than this")
+	cmd.Flags().StringVar(&untilID, "until-id", "", "Only return results with an ID less than this")
+	cmd.Flags().StringVar(&startTime, "start-time", "", "Oldest UTC datetime (YYYY-MM-DDTHH:mm:ssZ)")
+	cmd.Flags().StringVar(&endTime, "end-time", "", "Newest UTC datetime (YYYY-MM-DDTHH:mm:ssZ)")
+	cmd.Flags().StringVar(&nextToken, "next-token", "", "Pagination token for next page of results")
+	cmd.Flags().StringVar(&tweetFields, "tweet-fields", "", "Comma-separated tweet fields (overrides defaults)")
+	cmd.Flags().StringVar(&userFields, "user-fields", "", "Comma-separated user fields (overrides defaults)")
+	cmd.Flags().StringVar(&expansions, "expansions", "", "Comma-separated expansions (overrides defaults)")
 	addCommonFlags(cmd)
 	return cmd
 }
