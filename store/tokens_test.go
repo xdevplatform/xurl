@@ -166,6 +166,21 @@ func TestMultiApp(t *testing.T) {
 		assert.Equal(t, []string{"bob"}, store.GetOAuth2UsernamesForApp("app2"))
 	})
 
+	t.Run("Per-app redirect uri is isolated", func(t *testing.T) {
+		err := store.SetAppRedirectURI("app1", "http://localhost:8080/callback")
+		require.NoError(t, err)
+		err = store.SetAppRedirectURI("app2", "http://localhost:9090/callback")
+		require.NoError(t, err)
+
+		redirectURI1, err := store.GetAppRedirectURI("app1")
+		require.NoError(t, err)
+		redirectURI2, err := store.GetAppRedirectURI("app2")
+		require.NoError(t, err)
+
+		assert.Equal(t, "http://localhost:8080/callback", redirectURI1)
+		assert.Equal(t, "http://localhost:9090/callback", redirectURI2)
+	})
+
 	t.Run("Remove app", func(t *testing.T) {
 		err := store.RemoveApp("app2")
 		require.NoError(t, err)
@@ -221,6 +236,17 @@ func TestMultiApp(t *testing.T) {
 		require.NotNil(t, tok)
 		assert.Equal(t, "z-tok", tok.OAuth2.AccessToken)
 	})
+
+	t.Run("Unnamed tokens are lower priority than named tokens", func(t *testing.T) {
+		store.SetDefaultApp("app1")
+		err := store.SaveOAuth2TokenForApp("app1", "", "fallback-tok", "fallback-ref", 444)
+		require.NoError(t, err)
+
+		username, tok := store.GetFirstOAuth2TokenRecordForApp("app1")
+		require.NotNil(t, tok)
+		assert.NotEmpty(t, username)
+		assert.NotEqual(t, "fallback-tok", tok.OAuth2.AccessToken)
+	})
 }
 
 func TestUpdateApp(t *testing.T) {
@@ -253,8 +279,21 @@ func TestUpdateApp(t *testing.T) {
 		assert.Equal(t, "newer-secret", app.ClientSecret)
 	})
 
+	t.Run("Set and get redirect URI", func(t *testing.T) {
+		err := store.SetAppRedirectURI("myapp", "http://localhost:8080/callback")
+		require.NoError(t, err)
+		redirectURI, err := store.GetAppRedirectURI("myapp")
+		require.NoError(t, err)
+		assert.Equal(t, "http://localhost:8080/callback", redirectURI)
+	})
+
 	t.Run("Update nonexistent app fails", func(t *testing.T) {
 		err := store.UpdateApp("nope", "x", "y")
+		assert.Error(t, err)
+	})
+
+	t.Run("Get redirect URI for nonexistent app fails", func(t *testing.T) {
+		_, err := store.GetAppRedirectURI("nope")
 		assert.Error(t, err)
 	})
 }

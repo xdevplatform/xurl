@@ -40,13 +40,15 @@ For multiple pre-configured apps, switch between them:
 xurl auth default prod-app          # set default app
 xurl auth default prod-app alice    # set default app + user
 xurl --app dev-app /2/users/me      # one-off override
+xurl auth apps redirect-uri get prod-app
+xurl auth apps redirect-uri set prod-app http://localhost:8080/callback
 ```
 
 ### Other auth methods
 
 Examples with inline secret flags are intentionally omitted. If OAuth1 or app-only auth is needed, the user must run those commands manually outside agent/LLM context.
 
-Tokens are persisted to `~/.xurl` in YAML format. Each app has its own isolated tokens. Do not read this file through the agent/LLM. Once authenticated, every command below will auto‑attach the right `Authorization` header.
+Tokens are persisted to `~/.xurl` in YAML format. Each app has its own isolated tokens and may also store a `redirect_uri`. `REDIRECT_URI` in the environment still takes precedence over the stored app value. Do not read this file through the agent/LLM. Once authenticated, every command below will auto‑attach the right `Authorization` header.
 
 ---
 
@@ -87,7 +89,9 @@ Tokens are persisted to `~/.xurl` in YAML format. Each app has its own isolated 
 | **App Management** | |
 | Register app | Manual, outside agent (do not pass secrets via agent) |
 | List apps | `xurl auth apps list` |
-| Update app creds | Manual, outside agent (do not pass secrets via agent) |
+| Update app config | Manual, outside agent (do not pass secrets via agent) |
+| View app redirect URI | `xurl auth apps redirect-uri get [NAME]` |
+| Set app redirect URI | `xurl auth apps redirect-uri set NAME URI` |
 | Remove app | `xurl auth apps remove NAME` |
 | Set default (interactive) | `xurl auth default` |
 | Set default (command) | `xurl auth default APP_NAME [USERNAME]` |
@@ -382,7 +386,8 @@ xurl --app staging /2/users/me         # one-off request against staging
 - Non‑zero exit code on any error.
 - API errors are printed as JSON to stdout (so you can still parse them).
 - Auth errors suggest re‑running `xurl auth oauth2` or checking your tokens.
-- If a command requires your user ID (like, repost, bookmark, follow, etc.), xurl will automatically fetch it via `/2/users/me`. If that fails, you'll see an auth error.
+- If a command requires your user ID (like, repost, bookmark, follow, etc.), xurl will automatically fetch it via `/2/users/me`. When that endpoint is unreliable, use `--username USERNAME` or authenticate with `xurl auth oauth2 USERNAME` so xurl can fall back to username lookup.
+- If X returns `client-forbidden` / `client-not-enrolled` after successful auth, check the app’s X developer-console package and environment. In current testing, moving the app to `Pay-per-use` and `Production` fixed `/2/*` read failures without changing local `xurl` auth data.
 
 ---
 
@@ -391,7 +396,10 @@ xurl --app staging /2/users/me         # one-off request against staging
 - **Rate limits:** The X API enforces rate limits per endpoint. If you get a 429 error, wait and retry. Write endpoints (post, reply, like, repost) have stricter limits than read endpoints.
 - **Scopes:** OAuth 2.0 tokens are requested with broad scopes. If you get a 403 on a specific action, your token may lack the required scope — re‑run `xurl auth oauth2` to get a fresh token.
 - **Token refresh:** OAuth 2.0 tokens auto‑refresh when expired. No manual intervention needed.
-- **Multiple apps:** Each app has its own isolated credentials and tokens. Configure credentials manually outside agent/LLM context, then switch with `xurl auth default` or `--app`.
+- **Multiple apps:** Each app has its own isolated credentials, tokens, and optional stored `redirect_uri`. Configure credentials manually outside agent/LLM context, then switch with `xurl auth default` or `--app`.
+- **Redirect URI precedence:** The effective redirect URI resolves from `REDIRECT_URI` in the environment first, then the app's stored `redirect_uri` in `~/.xurl`, then the built-in default.
+- **Redirect URI management:** Use `xurl auth apps redirect-uri get [NAME]`, `xurl auth apps redirect-uri set NAME URI`, or `xurl auth apps update NAME --redirect-uri URI` to inspect and manage the stored per-app callback value.
+- **X platform enrollment:** A successful OAuth callback does not guarantee `/2/*` reads will work. If you see `client-not-enrolled`, verify the app is in the correct X package/environment. Current confirmed fix: `Apps` -> `Manage apps` -> `Move to package` -> choose `Pay-per-use`, then move the app to `Production`.
 - **Multiple accounts:** You can authenticate multiple OAuth 2.0 accounts per app and switch between them with `--username` / `-u` or set a default with `xurl auth default APP USER`.
 - **Default user:** When no `-u` flag is given, xurl uses the default user for the active app (set via `xurl auth default`). If no default user is set, it uses the first available token.
 - **Token storage:** `~/.xurl` is YAML. Each app stores its own credentials and tokens. Never read or send this file to LLM context.

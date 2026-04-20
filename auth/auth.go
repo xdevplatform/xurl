@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -29,15 +30,20 @@ import (
 )
 
 type Auth struct {
-	TokenStore   *store.TokenStore
-	infoURL      string
-	clientID     string
-	clientSecret string
-	authURL      string
-	tokenURL     string
-	redirectURI  string
-	appName      string // explicit app override (empty = use default)
+	TokenStore         *store.TokenStore
+	infoURL            string
+	clientID           string
+	clientSecret       string
+	authURL            string
+	tokenURL           string
+	redirectURI        string
+	redirectURIFromEnv bool
+	appName            string // explicit app override (empty = use default)
 }
+
+var openBrowserFunc = openBrowser
+
+var startListenerFunc = StartListener
 
 // NewAuth creates a new Auth object.
 // Credentials are resolved in order: env-var config → active app in .xurl store.
@@ -60,14 +66,15 @@ func NewAuth(cfg *config.Config) *Auth {
 	}
 
 	return &Auth{
-		TokenStore:   ts,
-		infoURL:      cfg.InfoURL,
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		authURL:      cfg.AuthURL,
-		tokenURL:     cfg.TokenURL,
-		redirectURI:  cfg.RedirectURI,
-		appName:      appName,
+		TokenStore:         ts,
+		infoURL:            cfg.InfoURL,
+		clientID:           clientID,
+		clientSecret:       clientSecret,
+		authURL:            cfg.AuthURL,
+		tokenURL:           cfg.TokenURL,
+		redirectURI:        cfg.RedirectURI,
+		redirectURIFromEnv: cfg.RedirectURIFromEnv,
+		appName:            appName,
 	}
 }
 
@@ -77,24 +84,40 @@ func (a *Auth) WithTokenStore(tokenStore *store.TokenStore) *Auth {
 	return a
 }
 
+// AppName returns the active app name override (empty means use default).
+func (a *Auth) AppName() string {
+	return a.appName
+}
+
 // WithAppName sets the explicit app name override.
 func (a *Auth) WithAppName(appName string) *Auth {
 	a.appName = appName
 	app := a.TokenStore.ResolveApp(appName)
 	if app != nil {
-		if a.clientID == "" {
+		if app.ClientID != "" {
 			a.clientID = app.ClientID
 		}
-		if a.clientSecret == "" {
+		if app.ClientSecret != "" {
 			a.clientSecret = app.ClientSecret
 		}
+	}
+	if !a.redirectURIFromEnv {
+		a.redirectURI = a.resolveRedirectURIForApp(appName)
 	}
 	return a
 }
 
+func (a *Auth) resolveRedirectURIForApp(appName string) string {
+	app := a.TokenStore.ResolveApp(appName)
+	if app != nil && app.RedirectURI != "" {
+		return app.RedirectURI
+	}
+	return config.DefaultRedirectURI
+}
+
 // GetOAuth1Header gets the OAuth1 header for a request
 func (a *Auth) GetOAuth1Header(method, urlStr string, additionalParams map[string]string) (string, error) {
-	token := a.TokenStore.GetOAuth1Tokens()
+	token := a.TokenStore.GetOAuth1TokensForApp(a.appName)
 	if token == nil || token.OAuth1 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("OAuth1 token not found"))
 	}
@@ -146,13 +169,17 @@ func (a *Auth) GetOAuth2Header(username string) (string, error) {
 	var token *store.Token
 
 	if username != "" {
-		token = a.TokenStore.GetOAuth2Token(username)
+		token = a.TokenStore.GetOAuth2TokenForApp(a.appName, username)
 	} else {
-		token = a.TokenStore.GetFirstOAuth2Token()
+		token = a.TokenStore.GetFirstOAuth2TokenForApp(a.appName)
 	}
 
 	if token == nil {
-		return a.OAuth2Flow(username)
+		accessToken, err := a.OAuth2Flow(username)
+		if err != nil {
+			return "", err
+		}
+		return "Bearer " + accessToken, nil
 	}
 
 	accessToken, err := a.RefreshOAuth2Token(username)
@@ -187,13 +214,14 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 		oauth2.SetAuthURLParam("code_challenge", challenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"))
 
-	err := openBrowser(authURL)
+	listenerConfig, err := listenerConfigFromRedirectURI(a.redirectURI)
 	if err != nil {
-		fmt.Println("Failed to open browser automatically. Please visit this URL manually:")
-		fmt.Println(authURL)
+		return "", xurlErrors.NewAuthError("InvalidRedirectURI", err)
 	}
 
 	codeChan := make(chan string, 1)
+	listenerReady := make(chan struct{})
+	listenerErrChan := make(chan error, 1)
 
 	callback := func(code, receivedState string) error {
 		if receivedState != state {
@@ -209,21 +237,22 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 	}
 
 	go func() {
-		parsedURL, err := url.Parse(a.redirectURI)
-		if err != nil {
-			codeChan <- ""
-			return
-		}
-
-		port := 8080
-		if parsedURL.Port() != "" {
-			fmt.Sscanf(parsedURL.Port(), "%d", &port)
-		}
-
-		if err := StartListener(port, callback); err != nil {
-			fmt.Printf("Error in OAuth listener: %v\n", err)
+		if err := startListenerFunc(listenerConfig.Addresses, listenerConfig.CallbackPath, callback, listenerReady); err != nil {
+			listenerErrChan <- err
 		}
 	}()
+
+	select {
+	case <-listenerReady:
+	case err := <-listenerErrChan:
+		return "", xurlErrors.NewAuthError("ListenerError", err)
+	}
+
+	err = openBrowserFunc(authURL)
+	if err != nil {
+		fmt.Println("Failed to open browser automatically. Please visit this URL manually:")
+		fmt.Println(authURL)
+	}
 
 	var code string
 	select {
@@ -231,6 +260,8 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 		if code == "" {
 			return "", xurlErrors.NewAuthError("ListenerError", errors.New("oauth2 listener failed"))
 		}
+	case err := <-listenerErrChan:
+		return "", xurlErrors.NewAuthError("ListenerError", err)
 	case <-time.After(5 * time.Minute):
 		return "", xurlErrors.NewAuthError("Timeout", errors.New("authentication timed out"))
 	}
@@ -240,22 +271,13 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 		return "", xurlErrors.NewAuthError("TokenExchangeError", err)
 	}
 
-	var usernameStr string
-	if username != "" {
-		usernameStr = username
-	} else {
-		fetchedUsername, err := a.fetchUsername(token.AccessToken)
-		if err != nil {
-			return "", err
-		}
-		usernameStr = fetchedUsername
-	}
-
-	expirationTime := uint64(time.Now().Add(time.Duration(token.Expiry.Unix()-time.Now().Unix()) * time.Second).Unix())
-
-	err = a.TokenStore.SaveOAuth2Token(usernameStr, token.AccessToken, token.RefreshToken, expirationTime)
-	if err != nil {
+	usernameStr, resolvedFromLookup := a.resolveStorageUsername(username, token.AccessToken)
+	if err := a.saveOAuth2Token(usernameStr, token); err != nil {
 		return "", xurlErrors.NewAuthError("TokenStorageError", err)
+	}
+	if username == "" && !resolvedFromLookup {
+		fmt.Println("Warning: authenticated successfully, but could not resolve your username via /2/users/me.")
+		fmt.Println("The OAuth2 token was saved without a username label. Re-run `xurl auth oauth2 YOUR_USERNAME` if you want a named token.")
 	}
 
 	return token.AccessToken, nil
@@ -263,14 +285,7 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 
 // RefreshOAuth2Token validates and refreshes an OAuth2 token if needed
 func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
-	var token *store.Token
-
-	if username != "" {
-		token = a.TokenStore.GetOAuth2Token(username)
-	} else {
-		token = a.TokenStore.GetFirstOAuth2Token()
-	}
-
+	storedUsername, token := a.getOAuth2TokenRecord(username)
 	if token == nil || token.OAuth2 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("oauth2 token not found"))
 	}
@@ -297,30 +312,95 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 		return "", xurlErrors.NewAuthError("RefreshTokenError", err)
 	}
 
-	var usernameStr string
-	if username != "" {
-		usernameStr = username
-	} else {
-		fetchedUsername, err := a.fetchUsername(newToken.AccessToken)
-		if err != nil {
-			return "", xurlErrors.NewAuthError("UsernameFetchError", err)
-		}
-		usernameStr = fetchedUsername
+	usernameStr := storedUsername
+	if usernameStr == "" {
+		resolvedUsername, _ := a.resolveStorageUsername("", newToken.AccessToken)
+		usernameStr = resolvedUsername
 	}
-
-	expirationTime := uint64(time.Now().Add(time.Duration(newToken.Expiry.Unix()-time.Now().Unix()) * time.Second).Unix())
-
-	err = a.TokenStore.SaveOAuth2Token(usernameStr, newToken.AccessToken, newToken.RefreshToken, expirationTime)
-	if err != nil {
+	if storedUsername == "" && usernameStr != "" {
+		if err := a.TokenStore.ClearOAuth2TokenForApp(a.appName, storedUsername); err != nil {
+			return "", xurlErrors.NewAuthError("RefreshTokenError", err)
+		}
+	}
+	if err := a.saveOAuth2Token(usernameStr, newToken); err != nil {
 		return "", xurlErrors.NewAuthError("RefreshTokenError", err)
 	}
 
 	return newToken.AccessToken, nil
 }
 
+type oauth2ListenerConfig struct {
+	Addresses    []string
+	CallbackPath string
+}
+
+func listenerConfigFromRedirectURI(redirectURI string) (oauth2ListenerConfig, error) {
+	parsedURL, err := url.Parse(redirectURI)
+	if err != nil {
+		return oauth2ListenerConfig{}, err
+	}
+
+	host := parsedURL.Hostname()
+	if host == "" {
+		host = "localhost"
+	}
+
+	port := parsedURL.Port()
+	if port == "" {
+		port = "8080"
+	}
+
+	callbackPath := parsedURL.Path
+	if callbackPath == "" {
+		callbackPath = "/callback"
+	}
+
+	return oauth2ListenerConfig{
+		Addresses:    listenerAddressesForHost(host, port),
+		CallbackPath: callbackPath,
+	}, nil
+}
+
+func listenerAddressesForHost(host, port string) []string {
+	if strings.EqualFold(host, "localhost") {
+		return []string{
+			net.JoinHostPort("127.0.0.1", port),
+			net.JoinHostPort("::1", port),
+		}
+	}
+
+	return []string{net.JoinHostPort(host, port)}
+}
+
+func (a *Auth) resolveStorageUsername(explicitUsername, accessToken string) (string, bool) {
+	if explicitUsername != "" {
+		return explicitUsername, true
+	}
+
+	username, err := a.fetchUsername(accessToken)
+	if err != nil {
+		return "", false
+	}
+
+	return username, true
+}
+
+func (a *Auth) getOAuth2TokenRecord(username string) (string, *store.Token) {
+	if username != "" {
+		return username, a.TokenStore.GetOAuth2TokenForApp(a.appName, username)
+	}
+
+	return a.TokenStore.GetFirstOAuth2TokenRecordForApp(a.appName)
+}
+
+func (a *Auth) saveOAuth2Token(username string, token *oauth2.Token) error {
+	expirationTime := uint64(time.Now().Add(time.Duration(token.Expiry.Unix()-time.Now().Unix()) * time.Second).Unix())
+	return a.TokenStore.SaveOAuth2TokenForApp(a.appName, username, token.AccessToken, token.RefreshToken, expirationTime)
+}
+
 // GetBearerTokenHeader gets the bearer token from the token store
 func (a *Auth) GetBearerTokenHeader() (string, error) {
-	token := a.TokenStore.GetBearerToken()
+	token := a.TokenStore.GetBearerTokenForApp(a.appName)
 	if token == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("bearer token not found"))
 	}
@@ -461,20 +541,17 @@ func getOAuth2Scopes() []string {
 }
 
 func openBrowser(url string) error {
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", url}
-	case "darwin":
-		cmd = "open"
-		args = []string{url}
-	default:
-		cmd = "xdg-open"
-		args = []string{url}
-	}
-
+	cmd, args := browserLaunchCommand(runtime.GOOS, url)
 	return exec.Command(cmd, args...).Start()
+}
+
+func browserLaunchCommand(goos, url string) (string, []string) {
+	switch goos {
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", url}
+	case "darwin":
+		return "open", []string{url}
+	default:
+		return "xdg-open", []string{url}
+	}
 }
