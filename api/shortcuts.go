@@ -152,7 +152,7 @@ func ReadPost(client Client, postID string, opts RequestOptions) (json.RawMessag
 	postID = ResolvePostID(postID)
 
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/tweets/%s?tweet.fields=created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets,entities,attachments&expansions=author_id,referenced_tweets.id&user.fields=username,name,verified", postID)
+	opts.Endpoint = fmt.Sprintf("/2/tweets/%s?tweet.fields=created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets,entities,attachments,note_tweet,article&expansions=author_id,referenced_tweets.id&user.fields=username,name,verified", postID)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
