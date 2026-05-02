@@ -195,8 +195,9 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		Endpoint: oauth2.Endpoint{
-			AuthURL:  a.authURL,
-			TokenURL: a.tokenURL,
+			AuthURL:   a.authURL,
+			TokenURL:  a.tokenURL,
+			AuthStyle: oauth2.AuthStyleInHeader,
 		},
 		RedirectURL: a.redirectURI,
 		Scopes:      getOAuth2Scopes(),
