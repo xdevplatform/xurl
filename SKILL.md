@@ -255,7 +255,6 @@ These flags work on every command:
 | `--auth` | | Force auth type: `oauth1`, `oauth2`, or `app` |
 | `--username` | `-u` | Which OAuth2 account to use (if you have multiple) |
 | `--verbose` | `-v` | Forbidden in agent/LLM sessions (can leak auth headers/tokens) |
-| `--trace` | `-t` | Add `X-B3-Flags: 1` trace header |
 
 ---
 
