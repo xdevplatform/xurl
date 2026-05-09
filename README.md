@@ -9,7 +9,7 @@ A command-line tool for interacting with the X (formerly Twitter) API, supportin
 - OAuth 1.0a authentication
 - Multiple OAuth 2.0 account support per app
 - Default app and default user selection (interactive Bubble Tea picker or single command)
-- Persistent token storage in YAML (`~/.xurl`), auto-migrates from legacy JSON
+- Persistent token storage in YAML (`~/.xurl` or `$XURL_STORE_DIR/.xurl`), auto-migrates from legacy JSON
 - HTTP request customization (headers, methods, body)
 - Per-request app override with `--app`
 
@@ -324,7 +324,15 @@ xurl '/2/media/upload?command=STATUS&media_id=MEDIA_ID'
 
 ## Token Storage
 
-Tokens and app credentials are stored in `~/.xurl` in YAML format. Each registered app has its own isolated set of tokens. Example:
+Tokens and app credentials are stored in `~/.xurl` in YAML format. Set `XURL_STORE_DIR` to use a different folder, for example with a mounted container volume:
+
+```bash
+docker run -v "$PWD/xurl-data:/xurl-data" -e XURL_STORE_DIR=/xurl-data ...
+```
+
+With that setting, xurl stores tokens at `/xurl-data/.xurl` and imports `.twurlrc` from `/xurl-data/.twurlrc`.
+
+Each registered app has its own isolated set of tokens. Example:
 
 ```yaml
 apps:

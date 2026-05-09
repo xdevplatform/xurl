@@ -35,6 +35,60 @@ func TestNewTokenStore(t *testing.T) {
 	assert.NotEmpty(t, store.FilePath, "Expected non-empty FilePath")
 }
 
+func TestNewTokenStoreUsesHomeByDefault(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl-store-home-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	t.Setenv("HOME", tempDir)
+	t.Setenv("XURL_STORE_DIR", "")
+
+	store := NewTokenStore()
+
+	assert.Equal(t, filepath.Join(tempDir, ".xurl"), store.FilePath)
+}
+
+func TestNewTokenStoreUsesCustomStoreDir(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl-store-dir-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	storeDir := filepath.Join(tempDir, "mounted")
+	t.Setenv("XURL_STORE_DIR", storeDir)
+
+	store := NewTokenStore()
+
+	assert.Equal(t, filepath.Join(storeDir, ".xurl"), store.FilePath)
+
+	err = store.SaveBearerToken("test-bearer-token")
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(storeDir, ".xurl"))
+	assert.NoError(t, err)
+}
+
+func TestSaveCreatesCustomStoreDir(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl-store-mkdir-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	storeDir := filepath.Join(tempDir, "missing", "nested")
+	store := &TokenStore{
+		Apps:       make(map[string]*App),
+		DefaultApp: "default",
+		FilePath:   filepath.Join(storeDir, ".xurl"),
+	}
+	store.Apps["default"] = &App{
+		OAuth2Tokens: make(map[string]Token),
+	}
+
+	err = store.SaveBearerToken("test-bearer-token")
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(storeDir, ".xurl"))
+	assert.NoError(t, err)
+}
+
 func TestTokenOperations(t *testing.T) {
 	store, tempDir := createTempTokenStore(t)
 	defer os.RemoveAll(tempDir)
@@ -665,4 +719,45 @@ configuration:
 		err = store.importFromTwurlrc(malformedPath)
 		assert.Error(t, err, "Expected error when importing from malformed .twurlrc")
 	})
+}
+
+func TestTwurlrcUsesCustomStoreDir(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xurl-twurl-store-dir-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	homeDir := filepath.Join(tempDir, "home")
+	storeDir := filepath.Join(tempDir, "store")
+	require.NoError(t, os.MkdirAll(homeDir, 0700))
+	require.NoError(t, os.MkdirAll(storeDir, 0700))
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XURL_STORE_DIR", storeDir)
+
+	twurlContent := `profiles:
+  testuser:
+    test_consumer_key:
+      username: testuser
+      consumer_key: test_consumer_key
+      consumer_secret: test_consumer_secret
+      token: test_access_token
+      secret: test_token_secret
+configuration:
+  default_profile:
+  - testuser
+  - test_consumer_key`
+
+	err = os.WriteFile(filepath.Join(storeDir, ".twurlrc"), []byte(twurlContent), 0600)
+	require.NoError(t, err)
+
+	store := NewTokenStore()
+
+	assert.Equal(t, filepath.Join(storeDir, ".xurl"), store.FilePath)
+
+	oauth1Token := store.GetOAuth1Tokens()
+	require.NotNil(t, oauth1Token)
+	assert.Equal(t, "test_access_token", oauth1Token.OAuth1.AccessToken)
+
+	_, err = os.Stat(filepath.Join(storeDir, ".xurl"))
+	assert.NoError(t, err)
 }
