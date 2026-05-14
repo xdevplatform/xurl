@@ -65,6 +65,35 @@ func createAuthOAuth2Cmd(a *auth.Auth) *cobra.Command {
 			if len(args) > 0 {
 				username = args[0]
 			}
+
+			// Warn when --app is not specified and the default app has no
+			// client credentials but another registered app does.  Tokens
+			// saved to a credential-less app cannot be refreshed, causing
+			// cryptic 401 errors on all subsequent API calls.
+			if a.AppName() == "" {
+				defaultApp := a.TokenStore.GetApp("")
+				hasCredentials := defaultApp != nil && defaultApp.ClientID != ""
+				if !hasCredentials {
+					var credentialed []string
+					for _, name := range a.TokenStore.ListApps() {
+						app := a.TokenStore.GetApp(name)
+						if app != nil && app.ClientID != "" {
+							credentialed = append(credentialed, name)
+						}
+					}
+					if len(credentialed) > 0 {
+						fmt.Fprintf(os.Stderr, "\033[33m⚠️  No --app specified. The OAuth2 token will be saved to the \"default\" app,\n")
+						fmt.Fprintf(os.Stderr, "    which has no client credentials stored. API calls will fail with 401 errors.\n\n")
+						fmt.Fprintf(os.Stderr, "    App(s) with credentials available:\n")
+						for _, name := range credentialed {
+							app := a.TokenStore.GetApp(name)
+							fmt.Fprintf(os.Stderr, "      --app %s  [client_id: %s…]\n", name, truncate(app.ClientID, 8))
+						}
+						fmt.Fprintf(os.Stderr, "\n    Run instead:  xurl auth oauth2 --app %s\n\n", credentialed[0])
+					}
+				}
+			}
+
 			_, err := a.OAuth2Flow(username)
 			if err != nil {
 				fmt.Println("OAuth2 authentication failed:", err)
