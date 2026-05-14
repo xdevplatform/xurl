@@ -29,11 +29,13 @@ Before using any command you must be authenticated. Run `xurl auth status` to ch
 ### Register an app (recommended)
 
 App credential registration must be done manually by the user outside the agent/LLM session.
-After credentials are registered, authenticate with:
+After credentials are registered, authenticate against the app that holds those credentials:
 
 ```bash
-xurl auth oauth2
+xurl auth oauth2 --app APP_NAME
 ```
+
+You can also run `xurl auth default APP_NAME` first and then use `xurl auth oauth2`.
 
 For multiple pre-configured apps, switch between them:
 ```bash
@@ -385,7 +387,7 @@ xurl --app staging /2/users/me         # one-off request against staging
 - Non‑zero exit code on any error.
 - API errors are printed as JSON to stdout (so you can still parse them).
 - Auth errors suggest re‑running `xurl auth oauth2` or checking your tokens.
-- If a command requires your user ID (like, repost, bookmark, follow, etc.), xurl will automatically fetch it via `/2/users/me`. When that endpoint is unreliable, use `--username USERNAME` or authenticate with `xurl auth oauth2 USERNAME` so xurl can fall back to username lookup.
+- If a command requires your user ID (like, repost, bookmark, follow, etc.), xurl will automatically fetch it via `/2/users/me`. When that endpoint is unreliable, use `--username USERNAME` or authenticate with `xurl auth oauth2 --app APP_NAME USERNAME` so xurl can fall back to username lookup.
 - If X returns `client-forbidden` / `client-not-enrolled` after successful auth, check the app’s X developer-console package and environment. In current testing, moving the app to `Pay-per-use` and `Production` fixed `/2/*` read failures without changing local `xurl` auth data.
 
 ---

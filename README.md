@@ -79,10 +79,12 @@ xurl auth apps add dev-app  --client-id DEV_ID  --client-secret DEV_SECRET
 ```bash
 xurl auth apps add my-app --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET
 ```
-4. Get your access keys:
+4. Get your access keys for the registered app:
 ```bash
-xurl auth oauth2
+xurl auth oauth2 --app my-app
 ```
+
+If you omit `--app`, the token is saved to the current default app. You can also run `xurl auth default my-app` first and then use `xurl auth oauth2`.
 
 If X returns a `client-forbidden` / `client-not-enrolled` error even though auth completed successfully, check the app’s package and environment in the X developer console. On current X platform setup, the working fix was:
 
@@ -97,7 +99,7 @@ Without that enrollment step, `xurl whoami` and other `/2/*` reads can fail even
 If X does not return your username reliably through `/2/users/me`, authenticate with an explicit handle instead:
 
 ```bash
-xurl auth oauth2 YOUR_USERNAME
+xurl auth oauth2 --app my-app YOUR_USERNAME
 ```
 
 That keeps the OAuth2 token associated with the expected username and also gives shortcut commands a fallback when `/2/users/me` is unavailable.
