@@ -306,7 +306,7 @@ You can also use the main command with the `-F` flag for direct media uploads:
 
 1. First, initialize the upload:
 ```bash
-xurl -X POST '/2/media/upload?command=INIT&total_bytes=FILE_SIZE&media_type=video/mp4&media_catefory=tweet_video'
+xurl -X POST '/2/media/upload?command=INIT&total_bytes=FILE_SIZE&media_type=video/mp4&media_category=tweet_video'
 ```
 
 2. Then, append the media chunks:
