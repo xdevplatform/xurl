@@ -158,8 +158,22 @@ func ReadPost(client Client, postID string, opts RequestOptions) (json.RawMessag
 	return client.SendRequest(opts)
 }
 
+// PaginationOptions holds optional pagination and field-override flags
+// shared by search, timeline, and mentions commands.
+type PaginationOptions struct {
+	SinceID     string
+	UntilID     string
+	StartTime   string
+	EndTime     string
+	NextToken   string
+	TweetFields string
+	UserFields  string
+	Expansions  string
+	Exclude     string // timeline/mentions only: "replies,retweets"
+}
+
 // SearchPosts searches recent posts.
-func SearchPosts(client Client, query string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+func SearchPosts(client Client, query string, maxResults int, pag PaginationOptions, opts RequestOptions) (json.RawMessage, error) {
 	q := url.QueryEscape(query)
 
 	// X API enforces min 10 / max 100 for search
@@ -169,8 +183,41 @@ func SearchPosts(client Client, query string, maxResults int, opts RequestOption
 		maxResults = 100
 	}
 
+	// Defaults
+	tweetFields := "created_at,public_metrics,conversation_id,entities"
+	userFields := "username,name,verified"
+	expansions := "author_id"
+	if pag.TweetFields != "" {
+		tweetFields = pag.TweetFields
+	}
+	if pag.UserFields != "" {
+		userFields = pag.UserFields
+	}
+	if pag.Expansions != "" {
+		expansions = pag.Expansions
+	}
+
+	endpoint := fmt.Sprintf("/2/tweets/search/recent?query=%s&max_results=%d&tweet.fields=%s&expansions=%s&user.fields=%s",
+		q, maxResults, tweetFields, expansions, userFields)
+
+	if pag.SinceID != "" {
+		endpoint += "&since_id=" + pag.SinceID
+	}
+	if pag.UntilID != "" {
+		endpoint += "&until_id=" + pag.UntilID
+	}
+	if pag.StartTime != "" {
+		endpoint += "&start_time=" + url.QueryEscape(pag.StartTime)
+	}
+	if pag.EndTime != "" {
+		endpoint += "&end_time=" + url.QueryEscape(pag.EndTime)
+	}
+	if pag.NextToken != "" {
+		endpoint += "&next_token=" + pag.NextToken
+	}
+
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/tweets/search/recent?query=%s&max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name,verified", q, maxResults)
+	opts.Endpoint = endpoint
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -207,18 +254,88 @@ func GetUserPosts(client Client, userID string, maxResults int, opts RequestOpti
 
 // GetTimeline fetches the authenticated user's reverse‑chronological timeline.
 // Route: GET /2/users/{id}/timelines/reverse_chronological
-func GetTimeline(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+func GetTimeline(client Client, userID string, maxResults int, pag PaginationOptions, opts RequestOptions) (json.RawMessage, error) {
+	tweetFields := "created_at,public_metrics,conversation_id,entities"
+	userFields := "username,name"
+	expansions := "author_id"
+	if pag.TweetFields != "" {
+		tweetFields = pag.TweetFields
+	}
+	if pag.UserFields != "" {
+		userFields = pag.UserFields
+	}
+	if pag.Expansions != "" {
+		expansions = pag.Expansions
+	}
+
+	endpoint := fmt.Sprintf("/2/users/%s/timelines/reverse_chronological?max_results=%d&tweet.fields=%s&expansions=%s&user.fields=%s",
+		userID, maxResults, tweetFields, expansions, userFields)
+
+	if pag.SinceID != "" {
+		endpoint += "&since_id=" + pag.SinceID
+	}
+	if pag.UntilID != "" {
+		endpoint += "&until_id=" + pag.UntilID
+	}
+	if pag.StartTime != "" {
+		endpoint += "&start_time=" + url.QueryEscape(pag.StartTime)
+	}
+	if pag.EndTime != "" {
+		endpoint += "&end_time=" + url.QueryEscape(pag.EndTime)
+	}
+	if pag.NextToken != "" {
+		endpoint += "&pagination_token=" + pag.NextToken
+	}
+	if pag.Exclude != "" {
+		endpoint += "&exclude=" + pag.Exclude
+	}
+
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/timelines/reverse_chronological?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
+	opts.Endpoint = endpoint
 	opts.Data = ""
 
 	return client.SendRequest(opts)
 }
 
 // GetMentions fetches recent mentions for a user.
-func GetMentions(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+func GetMentions(client Client, userID string, maxResults int, pag PaginationOptions, opts RequestOptions) (json.RawMessage, error) {
+	tweetFields := "created_at,public_metrics,conversation_id,entities"
+	userFields := "username,name"
+	expansions := "author_id"
+	if pag.TweetFields != "" {
+		tweetFields = pag.TweetFields
+	}
+	if pag.UserFields != "" {
+		userFields = pag.UserFields
+	}
+	if pag.Expansions != "" {
+		expansions = pag.Expansions
+	}
+
+	endpoint := fmt.Sprintf("/2/users/%s/mentions?max_results=%d&tweet.fields=%s&expansions=%s&user.fields=%s",
+		userID, maxResults, tweetFields, expansions, userFields)
+
+	if pag.SinceID != "" {
+		endpoint += "&since_id=" + pag.SinceID
+	}
+	if pag.UntilID != "" {
+		endpoint += "&until_id=" + pag.UntilID
+	}
+	if pag.StartTime != "" {
+		endpoint += "&start_time=" + url.QueryEscape(pag.StartTime)
+	}
+	if pag.EndTime != "" {
+		endpoint += "&end_time=" + url.QueryEscape(pag.EndTime)
+	}
+	if pag.NextToken != "" {
+		endpoint += "&pagination_token=" + pag.NextToken
+	}
+	if pag.Exclude != "" {
+		endpoint += "&exclude=" + pag.Exclude
+	}
+
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/mentions?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
+	opts.Endpoint = endpoint
 	opts.Data = ""
 
 	return client.SendRequest(opts)
