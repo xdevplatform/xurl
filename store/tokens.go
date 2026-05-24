@@ -61,7 +61,7 @@ type App struct {
 
 // ─── On-disk YAML structure ─────────────────────────────────────────
 
-// storeFile is the serialised YAML layout of ~/.xurl
+// storeFile is the serialized YAML layout of the .xurl auth file.
 type storeFile struct {
 	Apps       map[string]*App `yaml:"apps"`
 	DefaultApp string          `yaml:"default_app"`
@@ -98,7 +98,15 @@ func resolveHomeDir() string {
 	return homeDir
 }
 
-// Creates a new TokenStore, loading from ~/.xurl (auto-migrating legacy JSON).
+func resolveStoreDir() string {
+	if storeDir := os.Getenv("XURL_STORE_DIR"); storeDir != "" {
+		return storeDir
+	}
+
+	return resolveHomeDir()
+}
+
+// Creates a new TokenStore, loading from .xurl (auto-migrating legacy JSON).
 func NewTokenStore() *TokenStore {
 	return NewTokenStoreWithCredentials("", "")
 }
@@ -107,8 +115,8 @@ func NewTokenStore() *TokenStore {
 // client credentials into any app that was migrated without them (i.e. legacy
 // JSON migration where CLIENT_ID / CLIENT_SECRET came from env vars).
 func NewTokenStoreWithCredentials(clientID, clientSecret string) *TokenStore {
-	homeDir := resolveHomeDir()
-	filePath := filepath.Join(homeDir, ".xurl")
+	storeDir := resolveStoreDir()
+	filePath := filepath.Join(storeDir, ".xurl")
 
 	store := &TokenStore{
 		Apps:     make(map[string]*App),
@@ -144,7 +152,7 @@ func NewTokenStoreWithCredentials(clientID, clientSecret string) *TokenStore {
 	// Import from .twurlrc if we have no apps or the default app is missing OAuth1/Bearer
 	app := store.activeApp()
 	if app == nil || app.OAuth1Token == nil || app.BearerToken == nil {
-		twurlPath := filepath.Join(homeDir, ".twurlrc")
+		twurlPath := filepath.Join(storeDir, ".twurlrc")
 		if _, err := os.Stat(twurlPath); err == nil {
 			if err := store.importFromTwurlrc(twurlPath); err != nil {
 				fmt.Println("Error importing from .twurlrc:", err)
@@ -616,7 +624,7 @@ func (s *TokenStore) HasBearerToken() bool {
 
 // ─── Persistence ────────────────────────────────────────────────────
 
-// Saves the token store to ~/.xurl in YAML format.
+// Saves the token store to .xurl in YAML format.
 func (s *TokenStore) saveToFile() error {
 	sf := storeFile{
 		Apps:       s.Apps,
@@ -625,6 +633,10 @@ func (s *TokenStore) saveToFile() error {
 	data, err := yaml.Marshal(&sf)
 	if err != nil {
 		return errors.NewJSONError(err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(s.FilePath), 0700); err != nil {
+		return errors.NewIOError(err)
 	}
 
 	err = os.WriteFile(s.FilePath, data, 0600)
