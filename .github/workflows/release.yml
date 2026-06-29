@@ -59,13 +59,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node >= 22.14 is required for OIDC trusted publishing.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "24"
 
-      # npm >= 11.5 is required for provenance and OIDC trusted publishing.
+      # npm >= 11.5 is required for OIDC trusted publishing. Deliberately no
+      # registry-url / NODE_AUTH_TOKEN: a configured token (even an empty one)
+      # makes npm take the token auth path instead of OIDC. With none set, npm
+      # authenticates with the OIDC id-token against the trusted publisher
+      # configured on npmjs.com -- nothing to expire or rotate.
       - name: Use latest npm
         run: npm install -g npm@latest
 
@@ -79,12 +83,8 @@ jobs:
           fi
           echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC trusted publishing)
         run: |
           cd npm
           npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version
-          npm publish --access public --provenance
-        env:
-          # Falls back to the token when trusted publishing isn't configured;
-          # once a trusted publisher is set up on npmjs.com this can be removed.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --provenance --access public
