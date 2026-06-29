@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -442,8 +443,9 @@ func TestExecuteMediaUpload(t *testing.T) {
 	defer server.Close()
 
 	client := &ApiClient{
-		url:    server.URL,
-		client: &http.Client{Timeout: 30 * time.Second},
+		url:                  server.URL,
+		client:               &http.Client{Timeout: 30 * time.Second},
+		allowUnauthenticated: true,
 	}
 
 	tempFile, _ := createTempTestFile(t, 1024)
@@ -478,12 +480,164 @@ func TestExecuteMediaStatus(t *testing.T) {
 	defer server.Close()
 
 	client := &ApiClient{
-		url:    server.URL,
-		client: &http.Client{Timeout: 30 * time.Second},
+		url:                  server.URL,
+		client:               &http.Client{Timeout: 30 * time.Second},
+		allowUnauthenticated: true,
 	}
 
 	err := ExecuteMediaStatus("test_media_id", "oauth2", "testuser", false, false, false, []string{}, client)
 	assert.NoError(t, err)
+}
+
+// TestExecuteMediaUploadWaitsForVideoProcessing guards against the
+// waitForProcessing/trace argument order being swapped: with wait=true and a
+// video category, the upload must poll the status endpoint until processing
+// succeeds.
+func TestExecuteMediaUploadWaitsForVideoProcessing(t *testing.T) {
+	var statusCalls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("command") == "STATUS" {
+			if atomic.AddInt32(&statusCalls, 1) == 1 {
+				w.Write([]byte(`{"data":{"processing_info":{"state":"in_progress","check_after_secs":0,"progress_percent":50}}}`))
+			} else {
+				w.Write([]byte(`{"data":{"processing_info":{"state":"succeeded","progress_percent":100}}}`))
+			}
+			return
+		}
+		switch ExtractCommand(r.URL.Path) {
+		case "initialize":
+			w.Write([]byte(`{"data":{"id":"vid123"}}`))
+		case "append":
+			w.Write([]byte(`{}`))
+		case "finalize":
+			w.Write([]byte(`{"data":{"id":"vid123"}}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client := &ApiClient{
+		url:                  server.URL,
+		client:               &http.Client{Timeout: 30 * time.Second},
+		allowUnauthenticated: true,
+	}
+
+	tempFile, _ := createTempTestFile(t, 1024)
+	defer os.Remove(tempFile)
+
+	// Args: verbose=false, waitForProcessing=true, trace=false.
+	err := ExecuteMediaUpload(tempFile, "video/mp4", "tweet_video", "", "", false, true, false, []string{}, client)
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&statusCalls), int32(2), "expected the status endpoint to be polled while waiting")
+}
+
+func TestDetectMediaTypeAndCategory(t *testing.T) {
+	cases := []struct {
+		path     string
+		wantType string
+		wantCat  string
+	}{
+		{"photo.jpg", "image/jpeg", "tweet_image"},
+		{"PHOTO.JPEG", "image/jpeg", "tweet_image"},
+		{"clip.mp4", "video/mp4", "tweet_video"},
+		{"loop.gif", "image/gif", "tweet_gif"},
+		{"art.png", "image/png", "tweet_image"},
+	}
+	for _, tc := range cases {
+		gotType := DetectMediaType(tc.path)
+		assert.Equal(t, tc.wantType, gotType, "DetectMediaType(%q)", tc.path)
+		gotCat, ok := DefaultMediaCategory(gotType)
+		assert.True(t, ok, "DefaultMediaCategory ok for %q", tc.path)
+		assert.Equal(t, tc.wantCat, gotCat, "DefaultMediaCategory for %q", tc.path)
+	}
+
+	// A recognized-but-unsupported MIME type has no default category.
+	if _, ok := DefaultMediaCategory("application/pdf"); ok {
+		t.Error("DefaultMediaCategory should not classify application/pdf")
+	}
+}
+
+func TestMediaNeedsProcessing(t *testing.T) {
+	assert.True(t, mediaNeedsProcessing("tweet_video"))
+	assert.True(t, mediaNeedsProcessing("amplify_video"))
+	assert.True(t, mediaNeedsProcessing("tweet_gif"))
+	assert.False(t, mediaNeedsProcessing("tweet_image"))
+}
+
+// TestExecuteMediaUploadWaitsForGIF verifies the auto-detected GIF category
+// (tweet_gif) is treated as async and polls processing when --wait is set.
+func TestExecuteMediaUploadWaitsForGIF(t *testing.T) {
+	var statusCalls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("command") == "STATUS" {
+			if atomic.AddInt32(&statusCalls, 1) == 1 {
+				w.Write([]byte(`{"data":{"processing_info":{"state":"in_progress","check_after_secs":0}}}`))
+			} else {
+				w.Write([]byte(`{"data":{"processing_info":{"state":"succeeded"}}}`))
+			}
+			return
+		}
+		switch ExtractCommand(r.URL.Path) {
+		case "initialize":
+			w.Write([]byte(`{"data":{"id":"gif123"}}`))
+		case "append":
+			w.Write([]byte(`{}`))
+		case "finalize":
+			w.Write([]byte(`{"data":{"id":"gif123"}}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client := &ApiClient{url: server.URL, client: &http.Client{Timeout: 30 * time.Second}, allowUnauthenticated: true}
+
+	gifFile := tempFileWithExt(t, ".gif", 1024)
+	defer os.Remove(gifFile)
+
+	// Empty media-type/category → auto-detect to image/gif + tweet_gif.
+	err := ExecuteMediaUpload(gifFile, "", "", "", "", false, true, false, []string{}, client)
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&statusCalls), int32(2), "GIF upload should poll processing")
+}
+
+func TestExecuteMediaUploadUndetectableTypeErrors(t *testing.T) {
+	mockClient := new(MockApiClient)
+	f := tempFileWithExt(t, ".unknownext", 16)
+	defer os.Remove(f)
+
+	err := ExecuteMediaUpload(f, "", "", "", "", false, false, false, nil, mockClient)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "could not detect media type")
+}
+
+// TestExecuteMediaUploadUnsupportedTypeErrors verifies a recognized-but-
+// unsupported media type (e.g. application/pdf) with no explicit category fails
+// clearly instead of being forced into tweet_image.
+func TestExecuteMediaUploadUnsupportedTypeErrors(t *testing.T) {
+	mockClient := new(MockApiClient)
+	f := tempFileWithExt(t, ".bin", 16)
+	defer os.Remove(f)
+
+	err := ExecuteMediaUpload(f, "application/pdf", "", "", "", false, false, false, nil, mockClient)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported media type")
+}
+
+func tempFileWithExt(t *testing.T, ext string, size int) string {
+	t.Helper()
+	f, err := os.CreateTemp("", "media_test_*"+ext)
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	if _, err := f.Write(make([]byte, size)); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	f.Close()
+	return f.Name()
 }
 
 func TestExtractMediaID(t *testing.T) {

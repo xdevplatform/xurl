@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -44,6 +45,10 @@ type Auth struct {
 var openBrowserFunc = openBrowser
 
 var startListenerFunc = StartListener
+
+// oauth2ExpirySkewSeconds refreshes a token slightly before its real expiry so a
+// token handed to a caller does not expire mid-request.
+const oauth2ExpirySkewSeconds = 30
 
 // NewAuth creates a new Auth object.
 // Credentials are resolved in order: env-var config → active app in .xurl store.
@@ -189,30 +194,96 @@ func (a *Auth) GetOAuth2Header(username string) (string, error) {
 	return "Bearer " + accessToken, nil
 }
 
-// OAuth2Flow starts the OAuth2 flow
-func (a *Auth) OAuth2Flow(username string) (string, error) {
-	config := &oauth2.Config{
+// oauth2AuthStyle picks how client credentials are sent to the token endpoint.
+// X requires confidential clients (those with a client secret) to authenticate
+// with an HTTP Basic Authorization header; public clients (PKCE, no secret) send
+// the client_id in the request body. Letting x/oauth2 auto-detect proved
+// unreliable against X (it could fail with "unauthorized_client: Missing valid
+// authorization header"), so the style is selected explicitly.
+func (a *Auth) oauth2AuthStyle() oauth2.AuthStyle {
+	if a.clientSecret != "" {
+		return oauth2.AuthStyleInHeader
+	}
+	return oauth2.AuthStyleInParams
+}
+
+// newOAuth2Config builds the OAuth2 config for the authorization-code flow.
+func (a *Auth) newOAuth2Config() *oauth2.Config {
+	return &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		Endpoint: oauth2.Endpoint{
-			AuthURL:  a.authURL,
-			TokenURL: a.tokenURL,
+			AuthURL:   a.authURL,
+			TokenURL:  a.tokenURL,
+			AuthStyle: a.oauth2AuthStyle(),
 		},
 		RedirectURL: a.redirectURI,
 		Scopes:      getOAuth2Scopes(),
 	}
+}
+
+// oauth2Attempt carries the per-login PKCE/state material and the authorize URL,
+// shared by the interactive and headless flows.
+type oauth2Attempt struct {
+	config   *oauth2.Config
+	state    string
+	verifier string
+	authURL  string
+}
+
+// prepareOAuth2Flow generates the state and PKCE verifier/challenge and builds
+// the authorize URL.
+func (a *Auth) prepareOAuth2Flow() (*oauth2Attempt, error) {
+	config := a.newOAuth2Config()
 
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return "", xurlErrors.NewAuthError("IOError", err)
+		return nil, xurlErrors.NewAuthError("IOError", err)
 	}
 	state := base64.StdEncoding.EncodeToString(b)
 
-	verifier, challenge := generateCodeVerifierAndChallenge()
+	verifier, challenge, err := generateCodeVerifierAndChallenge()
+	if err != nil {
+		return nil, xurlErrors.NewAuthError("IOError", err)
+	}
 
 	authURL := config.AuthCodeURL(state,
 		oauth2.SetAuthURLParam("code_challenge", challenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"))
+
+	return &oauth2Attempt{config: config, state: state, verifier: verifier, authURL: authURL}, nil
+}
+
+// exchangeAndSave swaps an authorization code for a token (using the PKCE
+// verifier) and persists it. Diagnostics go to stderr so callers that reserve
+// stdout for machine output (e.g. the mcp bridge) are never corrupted.
+func (a *Auth) exchangeAndSave(attempt *oauth2Attempt, username, code string) (string, error) {
+	token, err := attempt.config.Exchange(context.Background(), code,
+		oauth2.SetAuthURLParam("code_verifier", attempt.verifier))
+	if err != nil {
+		return "", xurlErrors.NewAuthError("TokenExchangeError", err)
+	}
+
+	usernameStr, resolvedFromLookup := a.resolveStorageUsername(username, token.AccessToken)
+	if err := a.saveOAuth2Token(usernameStr, token); err != nil {
+		return "", xurlErrors.NewAuthError("TokenStorageError", err)
+	}
+	if username == "" && !resolvedFromLookup {
+		fmt.Fprintln(os.Stderr, "Warning: authenticated successfully, but could not resolve your username via /2/users/me.")
+		fmt.Fprintln(os.Stderr, "The OAuth2 token was saved without a username label. Re-run `xurl auth oauth2 YOUR_USERNAME` if you want a named token.")
+	}
+
+	return token.AccessToken, nil
+}
+
+// OAuth2Flow runs the interactive authorization-code flow: it starts a local
+// callback listener, opens the browser, and waits for the redirect. On machines
+// without a reachable browser/callback, use the headless flow (StartHeadlessLogin) instead.
+func (a *Auth) OAuth2Flow(username string) (string, error) {
+	attempt, err := a.prepareOAuth2Flow()
+	if err != nil {
+		return "", err
+	}
 
 	listenerConfig, err := listenerConfigFromRedirectURI(a.redirectURI)
 	if err != nil {
@@ -224,7 +295,7 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 	listenerErrChan := make(chan error, 1)
 
 	callback := func(code, receivedState string) error {
-		if receivedState != state {
+		if receivedState != attempt.state {
 			return xurlErrors.NewAuthError("InvalidState", errors.New("invalid state parameter"))
 		}
 
@@ -248,10 +319,10 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 		return "", xurlErrors.NewAuthError("ListenerError", err)
 	}
 
-	err = openBrowserFunc(authURL)
-	if err != nil {
-		fmt.Println("Failed to open browser automatically. Please visit this URL manually:")
-		fmt.Println(authURL)
+	if err := openBrowserFunc(attempt.authURL); err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to open browser automatically. Please visit this URL manually:")
+		fmt.Fprintln(os.Stderr, attempt.authURL)
+		fmt.Fprintln(os.Stderr, "(On a remote/headless machine, re-run with --headless to paste the code instead.)")
 	}
 
 	var code string
@@ -266,40 +337,115 @@ func (a *Auth) OAuth2Flow(username string) (string, error) {
 		return "", xurlErrors.NewAuthError("Timeout", errors.New("authentication timed out"))
 	}
 
-	token, err := config.Exchange(context.Background(), code, oauth2.SetAuthURLParam("code_verifier", verifier))
+	return a.exchangeAndSave(attempt, username, code)
+}
+
+// HeadlessLogin is an in-progress headless authorization-code login. Obtain one
+// with StartHeadlessLogin, show the user AuthURL(), then pass whatever they paste
+// back (the full redirect URL or just the code) to Complete. This avoids a local
+// browser/callback entirely, so it works on headless/remote machines and never
+// depends on the browser or a listener succeeding. Presentation is left to the
+// caller -- the auth package never writes prompts itself.
+type HeadlessLogin struct {
+	auth     *Auth
+	attempt  *oauth2Attempt
+	username string
+}
+
+// StartHeadlessLogin begins a headless login: it generates the PKCE/state
+// material and the authorize URL without opening a browser or starting a
+// listener.
+func (a *Auth) StartHeadlessLogin(username string) (*HeadlessLogin, error) {
+	attempt, err := a.prepareOAuth2Flow()
 	if err != nil {
-		return "", xurlErrors.NewAuthError("TokenExchangeError", err)
+		return nil, err
+	}
+	return &HeadlessLogin{auth: a, attempt: attempt, username: username}, nil
+}
+
+// AuthURL is the URL the user opens in a browser (on any device) to authorize.
+func (h *HeadlessLogin) AuthURL() string { return h.attempt.authURL }
+
+// RedirectURI is the callback the browser is redirected to (where the code
+// appears in the address bar), shown to the user so they know what to copy.
+func (h *HeadlessLogin) RedirectURI() string { return h.auth.redirectURI }
+
+// Complete finishes the login from the value the user pasted back -- the full
+// redirect URL, a bare query string, or just the code -- verifying state (when
+// present), exchanging the code for a token, and persisting it.
+func (h *HeadlessLogin) Complete(pasted string) (string, error) {
+	code, err := parseHeadlessAuthCode(pasted, h.attempt.state)
+	if err != nil {
+		return "", xurlErrors.NewAuthError("InvalidCode", err)
+	}
+	return h.auth.exchangeAndSave(h.attempt, h.username, code)
+}
+
+// parseHeadlessAuthCode extracts the authorization code from a pasted value,
+// which may be the full redirect URL, a bare query string, or just the code. If
+// a state value is present it must match wantState (CSRF protection); a bare
+// code carries no state, which is acceptable for this user-initiated paste flow.
+func parseHeadlessAuthCode(input, wantState string) (string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", errors.New("no authorization code provided")
 	}
 
-	usernameStr, resolvedFromLookup := a.resolveStorageUsername(username, token.AccessToken)
-	if err := a.saveOAuth2Token(usernameStr, token); err != nil {
-		return "", xurlErrors.NewAuthError("TokenStorageError", err)
-	}
-	if username == "" && !resolvedFromLookup {
-		fmt.Println("Warning: authenticated successfully, but could not resolve your username via /2/users/me.")
-		fmt.Println("The OAuth2 token was saved without a username label. Re-run `xurl auth oauth2 YOUR_USERNAME` if you want a named token.")
+	// A pasted URL or query string carries "code=" (and usually "state=").
+	if strings.Contains(input, "code=") {
+		var q url.Values
+		if u, perr := url.Parse(input); perr == nil && len(u.Query()) > 0 {
+			q = u.Query()
+		} else if pq, perr := url.ParseQuery(input); perr == nil {
+			q = pq
+		}
+		code := q.Get("code")
+		if code == "" {
+			return "", errors.New("could not find a 'code' value in the pasted input")
+		}
+		if st := q.Get("state"); st != "" && wantState != "" && st != wantState {
+			return "", errors.New("state mismatch: the pasted URL is from a different login attempt")
+		}
+		return code, nil
 	}
 
-	return token.AccessToken, nil
+	// Otherwise treat the whole input as the bare authorization code.
+	return input, nil
 }
 
 // RefreshOAuth2Token validates and refreshes an OAuth2 token if needed
 func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
+	return a.refreshOAuth2Token(username, false)
+}
+
+// ForceRefreshOAuth2Token always performs the refresh-token grant, ignoring the
+// locally cached expiry. Use it when the server rejects a token the local clock
+// still considers valid (e.g. an HTTP 401 after a revocation or scope change).
+func (a *Auth) ForceRefreshOAuth2Token(username string) (string, error) {
+	return a.refreshOAuth2Token(username, true)
+}
+
+func (a *Auth) refreshOAuth2Token(username string, force bool) (string, error) {
 	storedUsername, token := a.getOAuth2TokenRecord(username)
 	if token == nil || token.OAuth2 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("oauth2 token not found"))
 	}
 
-	currentTime := time.Now().Unix()
-	if uint64(currentTime) < token.OAuth2.ExpirationTime {
-		return token.OAuth2.AccessToken, nil
+	if !force {
+		currentTime := time.Now().Unix()
+		// Refresh slightly before the real expiry so a token handed to a caller
+		// does not expire in-flight (mirrors x/oauth2's expiryDelta).
+		if uint64(currentTime)+oauth2ExpirySkewSeconds < token.OAuth2.ExpirationTime {
+			return token.OAuth2.AccessToken, nil
+		}
 	}
 
 	config := &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		Endpoint: oauth2.Endpoint{
-			TokenURL: a.tokenURL,
+			TokenURL:  a.tokenURL,
+			AuthStyle: a.oauth2AuthStyle(),
 		},
 	}
 
@@ -327,6 +473,19 @@ func (a *Auth) RefreshOAuth2Token(username string) (string, error) {
 	}
 
 	return newToken.AccessToken, nil
+}
+
+// GetValidOAuth2Token returns a valid OAuth2 access token for the active app and
+// the given username, refreshing and persisting it if it has expired. Pass an
+// empty username to use the app's default (or first) user.
+//
+// Unlike GetOAuth2Header it never launches the interactive browser flow, so it
+// is safe for non-interactive/scripted use. Callers that want browser fallback
+// (e.g. the mcp bridge) should invoke OAuth2Flow themselves when this returns an
+// error. This is the shared token-resolution primitive used by `xurl token` and
+// `xurl mcp`.
+func (a *Auth) GetValidOAuth2Token(username string) (string, error) {
+	return a.RefreshOAuth2Token(username)
 }
 
 type oauth2ListenerConfig struct {
@@ -394,7 +553,13 @@ func (a *Auth) getOAuth2TokenRecord(username string) (string, *store.Token) {
 }
 
 func (a *Auth) saveOAuth2Token(username string, token *oauth2.Token) error {
-	expirationTime := uint64(time.Now().Add(time.Duration(token.Expiry.Unix()-time.Now().Unix()) * time.Second).Unix())
+	// A zero expiry means the provider didn't return one; store 0 so the token
+	// is treated as already expired and refreshed on next use rather than cast
+	// into a far-future timestamp that would never refresh.
+	var expirationTime uint64
+	if !token.Expiry.IsZero() {
+		expirationTime = uint64(token.Expiry.Unix())
+	}
 	return a.TokenStore.SaveOAuth2TokenForApp(a.appName, username, token.AccessToken, token.RefreshToken, expirationTime)
 }
 
@@ -415,7 +580,7 @@ func (a *Auth) fetchUsername(accessToken string) (string, error) {
 
 	req.Header.Add("Authorization", "Bearer "+accessToken)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", xurlErrors.NewAuthError("NetworkError", err)
@@ -490,14 +655,16 @@ func encode(s string) string {
 	return url.QueryEscape(s)
 }
 
-func generateCodeVerifierAndChallenge() (string, string) {
+func generateCodeVerifierAndChallenge() (string, string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
 	verifier := base64.RawURLEncoding.EncodeToString(b)
 	h := sha256.New()
 	h.Write([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return verifier, challenge
+	return verifier, challenge, nil
 }
 
 func getOAuth2Scopes() []string {

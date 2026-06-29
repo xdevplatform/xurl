@@ -39,9 +39,12 @@ func newClient(a *auth.Auth) *api.ApiClient {
 }
 
 // printResult pretty‑prints a JSON response or exits on error.
+//
+// API error bodies (valid JSON) are intentionally written to stdout so they can
+// be piped/parsed the same way as a successful response; only non-JSON errors
+// (network/auth failures) go to stderr.
 func printResult(resp json.RawMessage, err error) {
 	if err != nil {
-		// Try to pretty‑print API error bodies
 		var raw json.RawMessage
 		if json.Unmarshal([]byte(err.Error()), &raw) == nil {
 			utils.FormatAndPrintResponse(raw)
@@ -115,35 +118,26 @@ func addCommonFlags(cmd *cobra.Command) {
 // -----------------------------------------------------------------
 
 func CreateShortcutCommands(rootCmd *cobra.Command, a *auth.Auth) {
-	rootCmd.AddCommand(
-		postCmd(a),
-		replyCmd(a),
-		quoteCmd(a),
-		deleteCmd(a),
-		readCmd(a),
-		searchCmd(a),
-		whoamiCmd(a),
-		userCmd(a),
-		timelineCmd(a),
-		mentionsCmd(a),
-		likeCmd(a),
-		unlikeCmd(a),
-		repostCmd(a),
-		unrepostCmd(a),
-		bookmarkCmd(a),
-		unbookmarkCmd(a),
-		bookmarksCmd(a),
-		followCmd(a),
-		unfollowCmd(a),
-		followingCmd(a),
-		followersCmd(a),
-		likesCmd(a),
-		dmCmd(a),
-		dmsCmd(a),
-		blockCmd(a),
-		unblockCmd(a),
-		muteCmd(a),
-		unmuteCmd(a),
+	add := func(groupID string, cmds ...*cobra.Command) {
+		for _, c := range cmds {
+			c.GroupID = groupID
+			rootCmd.AddCommand(c)
+		}
+	}
+
+	add(groupWrite,
+		postCmd(a), replyCmd(a), quoteCmd(a), deleteCmd(a), dmCmd(a),
+		likeCmd(a), unlikeCmd(a), repostCmd(a), unrepostCmd(a),
+		bookmarkCmd(a), unbookmarkCmd(a),
+	)
+	add(groupSocial,
+		whoamiCmd(a), userCmd(a),
+		followCmd(a), unfollowCmd(a), followingCmd(a), followersCmd(a),
+		blockCmd(a), unblockCmd(a), muteCmd(a), unmuteCmd(a),
+	)
+	add(groupRead,
+		readCmd(a), searchCmd(a), postsCmd(a), timelineCmd(a), mentionsCmd(a),
+		dmsCmd(a), bookmarksCmd(a), likesCmd(a),
 	)
 }
 
@@ -279,6 +273,33 @@ Examples:
 		},
 	}
 	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (min 10, max 100)")
+	addCommonFlags(cmd)
+	return cmd
+}
+
+func postsCmd(a *auth.Auth) *cobra.Command {
+	var maxResults int
+	cmd := &cobra.Command{
+		Use:   "posts USERNAME",
+		Short: "List a user's recent posts",
+		Long: `Fetch recent posts authored by a user (by @username).
+
+Examples:
+  xurl posts elonmusk
+  xurl posts @XDevelopers -n 50`,
+		Args: cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			client := newClient(a)
+			opts := baseOpts(cmd)
+			userID, err := resolveUserID(client, args[0], opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
+				os.Exit(1)
+			}
+			printResult(api.GetUserPosts(client, userID, maxResults, opts))
+		},
+	}
+	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (5–100)")
 	addCommonFlags(cmd)
 	return cmd
 }
@@ -576,7 +597,7 @@ Examples:
 			printResult(api.GetLikedPosts(client, userID, maxResults, opts))
 		},
 	}
-	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (1–100)")
+	cmd.Flags().IntVarP(&maxResults, "max-results", "n", 10, "Number of results (5–100)")
 	addCommonFlags(cmd)
 	return cmd
 }

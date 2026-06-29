@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 
 	"github.com/xdevplatform/xurl/config"
 	"github.com/xdevplatform/xurl/store"
@@ -139,8 +140,9 @@ func TestEncode(t *testing.T) {
 }
 
 func TestGenerateCodeVerifierAndChallenge(t *testing.T) {
-	verifier, challenge := generateCodeVerifierAndChallenge()
+	verifier, challenge, err := generateCodeVerifierAndChallenge()
 
+	require.NoError(t, err, "Expected no error generating verifier/challenge")
 	assert.NotEmpty(t, verifier, "Expected non-empty verifier")
 	assert.NotEmpty(t, challenge, "Expected non-empty challenge")
 	assert.NotEqual(t, verifier, challenge, "Expected verifier and challenge to be different")
@@ -571,4 +573,237 @@ func TestRefreshOAuth2TokenMigratesUnnamedTokenWhenUsernameLookupSucceeds(t *tes
 
 func serverURL(server *httptest.Server, suffix string) string {
 	return server.URL + suffix
+}
+
+func TestGetValidOAuth2Token(t *testing.T) {
+	t.Run("returns a valid token without refreshing", func(t *testing.T) {
+		ts, dir := createTempTokenStore(t)
+		defer os.RemoveAll(dir)
+
+		future := uint64(time.Now().Add(time.Hour).Unix())
+		require.NoError(t, ts.SaveOAuth2TokenForApp("default", "alice", "valid-access", "refresh", future))
+
+		a := NewAuth(&config.Config{}).WithTokenStore(ts)
+		tok, err := a.GetValidOAuth2Token("alice")
+		require.NoError(t, err)
+		assert.Equal(t, "valid-access", tok)
+	})
+
+	t.Run("refreshes and persists an expired token", func(t *testing.T) {
+		server := mockTokenServer(t, "refreshed-access", "refreshed-refresh")
+		defer server.Close()
+
+		ts, dir := createTempTokenStore(t)
+		defer os.RemoveAll(dir)
+
+		past := uint64(time.Now().Add(-time.Hour).Unix())
+		require.NoError(t, ts.SaveOAuth2TokenForApp("default", "alice", "old-access", "old-refresh", past))
+
+		a := NewAuth(&config.Config{TokenURL: serverURL(server, "/token")}).WithTokenStore(ts)
+		tok, err := a.GetValidOAuth2Token("alice")
+		require.NoError(t, err)
+		assert.Equal(t, "refreshed-access", tok)
+
+		stored := ts.GetOAuth2TokenForApp("default", "alice")
+		require.NotNil(t, stored)
+		assert.Equal(t, "refreshed-access", stored.OAuth2.AccessToken, "refreshed token must be persisted")
+	})
+
+	t.Run("errors without launching the browser when no token exists", func(t *testing.T) {
+		ts, dir := createTempTokenStore(t)
+		defer os.RemoveAll(dir)
+
+		a := NewAuth(&config.Config{}).WithTokenStore(ts)
+
+		// Must return promptly with an error rather than blocking on the
+		// interactive OAuth2 browser flow.
+		done := make(chan error, 1)
+		go func() { _, err := a.GetValidOAuth2Token(""); done <- err }()
+
+		select {
+		case err := <-done:
+			require.Error(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("GetValidOAuth2Token blocked; it must not launch the browser flow")
+		}
+	})
+
+	t.Run("refreshes a token that is still valid but within the expiry skew", func(t *testing.T) {
+		server := mockTokenServer(t, "skew-access", "skew-refresh")
+		defer server.Close()
+
+		ts, dir := createTempTokenStore(t)
+		defer os.RemoveAll(dir)
+
+		// Expires in 10s — still "valid" by the raw clock, but inside the 30s skew.
+		soon := uint64(time.Now().Add(10 * time.Second).Unix())
+		require.NoError(t, ts.SaveOAuth2TokenForApp("default", "alice", "old-access", "old-refresh", soon))
+
+		a := NewAuth(&config.Config{TokenURL: serverURL(server, "/token")}).WithTokenStore(ts)
+		tok, err := a.GetValidOAuth2Token("alice")
+		require.NoError(t, err)
+		assert.Equal(t, "skew-access", tok, "near-expiry token should be proactively refreshed")
+	})
+}
+
+func TestForceRefreshOAuth2Token(t *testing.T) {
+	server := mockTokenServer(t, "forced-access", "forced-refresh")
+	defer server.Close()
+
+	ts, dir := createTempTokenStore(t)
+	defer os.RemoveAll(dir)
+
+	// Token is NOT expired; a normal GetValidOAuth2Token would return it as-is.
+	future := uint64(time.Now().Add(time.Hour).Unix())
+	require.NoError(t, ts.SaveOAuth2TokenForApp("default", "alice", "old-access", "old-refresh", future))
+
+	a := NewAuth(&config.Config{TokenURL: serverURL(server, "/token")}).WithTokenStore(ts)
+
+	// Sanity: the non-forced path returns the cached token.
+	cached, err := a.GetValidOAuth2Token("alice")
+	require.NoError(t, err)
+	assert.Equal(t, "old-access", cached)
+
+	// Forced refresh ignores the local expiry and mints a new token.
+	forced, err := a.ForceRefreshOAuth2Token("alice")
+	require.NoError(t, err)
+	assert.Equal(t, "forced-access", forced)
+
+	stored := ts.GetOAuth2TokenForApp("default", "alice")
+	require.NotNil(t, stored)
+	assert.Equal(t, "forced-access", stored.OAuth2.AccessToken, "forced refresh must be persisted")
+}
+
+// mockTokenServerNoExpiry returns a refresh response WITHOUT expires_in, so the
+// resulting oauth2.Token has a zero Expiry.
+func mockTokenServerNoExpiry(t *testing.T, accessToken, refreshToken string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  accessToken,
+			"token_type":    "Bearer",
+			"refresh_token": refreshToken,
+		})
+	}))
+}
+
+func TestSaveOAuth2TokenZeroExpiryRefreshesAgain(t *testing.T) {
+	server := mockTokenServerNoExpiry(t, "no-expiry-access", "no-expiry-refresh")
+	defer server.Close()
+
+	ts, dir := createTempTokenStore(t)
+	defer os.RemoveAll(dir)
+
+	past := uint64(time.Now().Add(-time.Hour).Unix())
+	require.NoError(t, ts.SaveOAuth2TokenForApp("default", "alice", "old-access", "old-refresh", past))
+
+	a := NewAuth(&config.Config{TokenURL: serverURL(server, "/token")}).WithTokenStore(ts)
+
+	tok, err := a.GetValidOAuth2Token("alice")
+	require.NoError(t, err)
+	assert.Equal(t, "no-expiry-access", tok)
+
+	// A provider that returns no expiry must be stored as 0, not a far-future
+	// timestamp, so the next call refreshes again instead of serving a stale token.
+	stored := ts.GetOAuth2TokenForApp("default", "alice")
+	require.NotNil(t, stored)
+	assert.Equal(t, uint64(0), stored.OAuth2.ExpirationTime, "zero provider expiry must persist as 0")
+}
+
+func TestOAuth2AuthStyle(t *testing.T) {
+	// Confidential client (has a secret) -> HTTP Basic auth header.
+	withSecret := &Auth{clientSecret: "secret"}
+	assert.Equal(t, oauth2.AuthStyleInHeader, withSecret.oauth2AuthStyle())
+	// Public client (no secret) -> client_id in the request body.
+	noSecret := &Auth{clientSecret: ""}
+	assert.Equal(t, oauth2.AuthStyleInParams, noSecret.oauth2AuthStyle())
+}
+
+func TestParseHeadlessAuthCode(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		wantState string
+		wantCode  string
+		wantErr   bool
+	}{
+		{"bare code", "abc123", "", "abc123", false},
+		{"full redirect url", "http://localhost:8080/callback?state=S&code=abc123", "S", "abc123", false},
+		{"query string only", "state=S&code=abc123", "S", "abc123", false},
+		{"surrounding whitespace", "  http://localhost:8080/callback?code=xyz&state=S  ", "S", "xyz", false},
+		{"no state in url is accepted", "http://localhost:8080/callback?code=onlycode", "S", "onlycode", false},
+		{"state mismatch rejected", "http://localhost:8080/callback?state=OTHER&code=abc", "S", "", true},
+		{"empty input", "   ", "", "", true},
+		{"code key present but empty", "state=S&code=", "S", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseHeadlessAuthCode(tc.input, tc.wantState)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCode, got)
+		})
+	}
+}
+
+// TestHeadlessLoginExchangesPastedCode verifies the headless handle exposes the
+// authorize URL, then exchanges a pasted code and persists the token -- with no
+// browser and no callback listener.
+func TestHeadlessLoginExchangesPastedCode(t *testing.T) {
+	server := mockTokenServer(t, "headless-access", "headless-refresh")
+	defer server.Close()
+
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+	tokenStore.AddApp("my-app", "client-id", "client-secret")
+
+	cfg := &config.Config{
+		AuthURL:     "https://x.com/i/oauth2/authorize",
+		TokenURL:    server.URL + "/token",
+		RedirectURI: "http://localhost:8080/callback",
+	}
+	a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("my-app")
+
+	hl, err := a.StartHeadlessLogin("alice")
+	require.NoError(t, err)
+	assert.Contains(t, hl.AuthURL(), "code_challenge=")
+	assert.Equal(t, "http://localhost:8080/callback", hl.RedirectURI())
+
+	tok, err := hl.Complete("test-auth-code")
+	require.NoError(t, err)
+	assert.Equal(t, "headless-access", tok)
+
+	stored := tokenStore.GetOAuth2TokenForApp("my-app", "alice")
+	require.NotNil(t, stored)
+	assert.Equal(t, "headless-access", stored.OAuth2.AccessToken)
+	assert.Equal(t, "headless-refresh", stored.OAuth2.RefreshToken)
+}
+
+// TestHeadlessLoginRejectsStateMismatch verifies a pasted redirect URL whose
+// state does not match the login attempt is rejected before any token exchange.
+func TestHeadlessLoginRejectsStateMismatch(t *testing.T) {
+	server := mockTokenServer(t, "should-not-be-used", "nope")
+	defer server.Close()
+
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+	tokenStore.AddApp("my-app", "client-id", "client-secret")
+
+	cfg := &config.Config{
+		AuthURL:     "https://x.com/i/oauth2/authorize",
+		TokenURL:    server.URL + "/token",
+		RedirectURI: "http://localhost:8080/callback",
+	}
+	a := NewAuth(cfg).WithTokenStore(tokenStore).WithAppName("my-app")
+
+	hl, err := a.StartHeadlessLogin("alice")
+	require.NoError(t, err)
+
+	_, err = hl.Complete("http://localhost:8080/callback?state=bogus&code=abc")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "state mismatch")
 }

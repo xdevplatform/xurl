@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
 	"github.com/xdevplatform/xurl/utils"
 )
 
@@ -16,6 +18,58 @@ const (
 	// MediaEndpoint is the endpoint for media uploads
 	MediaEndpoint = "/2/media/upload"
 )
+
+// extToMediaType maps common file extensions to the MIME types the X API accepts.
+var extToMediaType = map[string]string{
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".mp4":  "video/mp4",
+	".m4v":  "video/mp4",
+	".mov":  "video/quicktime",
+}
+
+// DetectMediaType infers the MIME type from a file's extension, falling back to
+// the system MIME database and finally to a generic binary type.
+func DetectMediaType(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if t, ok := extToMediaType[ext]; ok {
+		return t
+	}
+	if t := mime.TypeByExtension(ext); t != "" {
+		if i := strings.IndexByte(t, ';'); i != -1 {
+			t = strings.TrimSpace(t[:i])
+		}
+		return t
+	}
+	return "application/octet-stream"
+}
+
+// DefaultMediaCategory returns the X media_category that matches a MIME type.
+// The boolean is false when the type is not a supported image/video/gif, so the
+// caller can fail clearly instead of forcing an unsupported file into an
+// arbitrary category (which the API would later reject with an opaque error).
+func DefaultMediaCategory(mediaType string) (string, bool) {
+	switch {
+	case mediaType == "image/gif":
+		return "tweet_gif", true
+	case strings.HasPrefix(mediaType, "image/"):
+		return "tweet_image", true
+	case strings.HasPrefix(mediaType, "video/"):
+		return "tweet_video", true
+	default:
+		return "", false
+	}
+}
+
+// mediaNeedsProcessing reports whether a media category is processed
+// asynchronously by the X API (videos and animated GIFs), in which case the
+// upload should wait for processing before the media_id can be used.
+func mediaNeedsProcessing(mediaCategory string) bool {
+	return strings.Contains(mediaCategory, "video") || strings.Contains(mediaCategory, "gif")
+}
 
 // MediaUploader handles media upload operations
 type MediaUploader struct {
@@ -341,6 +395,25 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 		return fmt.Errorf("error: %v", err)
 	}
 
+	// Fill in sensible defaults from the file itself when not specified. If the
+	// type can't be detected, or it is a recognized-but-unsupported type, fail
+	// clearly rather than guessing and letting the API reject the upload with an
+	// opaque server error.
+	if mediaType == "" {
+		detected := DetectMediaType(filePath)
+		if detected == "application/octet-stream" {
+			return fmt.Errorf("could not detect media type for %q; pass --media-type (and --category)", filePath)
+		}
+		mediaType = detected
+	}
+	if mediaCategory == "" {
+		category, ok := DefaultMediaCategory(mediaType)
+		if !ok {
+			return fmt.Errorf("unsupported media type %q; pass --category to override", mediaType)
+		}
+		mediaCategory = category
+	}
+
 	if err := uploader.Init(mediaType, mediaCategory); err != nil {
 		return fmt.Errorf("error initializing upload: %v", err)
 	}
@@ -356,8 +429,8 @@ func ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username s
 
 	utils.FormatAndPrintResponse(finalizeResponse)
 
-	// Wait for processing if requested
-	if waitForProcessing && strings.Contains(mediaCategory, "video") {
+	// Wait for processing if requested (videos and GIFs are processed async)
+	if waitForProcessing && mediaNeedsProcessing(mediaCategory) {
 		processingResponse, err := uploader.WaitForProcessing()
 		if err != nil {
 			return fmt.Errorf("error during media processing: %v", err)

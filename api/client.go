@@ -1,19 +1,19 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"bufio"
-	"mime/multipart"
-	"os"
-	"path/filepath"
 	"github.com/xdevplatform/xurl/auth"
 	"github.com/xdevplatform/xurl/config"
 	xurlErrors "github.com/xdevplatform/xurl/errors"
@@ -56,6 +56,12 @@ type ApiClient struct {
 	url    string
 	client *http.Client
 	auth   *auth.Auth
+	// allowUnauthenticated lets a request proceed with no Authorization header
+	// when no credentials can be resolved. It is meant for library/test usage
+	// that deliberately talks to an endpoint requiring no auth; production
+	// clients leave it false so a missing credential surfaces as a clear auth
+	// error instead of a confusing server-side 401.
+	allowUnauthenticated bool
 }
 
 // NewApiClient creates a new ApiClient
@@ -156,7 +162,7 @@ func (c *ApiClient) BuildMultipartRequest(options MultipartOptions) (*http.Reque
 func (c *ApiClient) SendRequest(options RequestOptions) (json.RawMessage, error) {
 	req, err := c.BuildRequest(options)
 	if err != nil {
-		return nil, xurlErrors.NewHTTPError(err)
+		return nil, err
 	}
 
 	c.logRequest(req, options.Verbose)
@@ -192,7 +198,7 @@ func (c *ApiClient) SendMultipartRequest(options MultipartOptions) (json.RawMess
 func (c *ApiClient) StreamRequest(options RequestOptions) error {
 	req, err := c.BuildRequest(options)
 	if err != nil {
-		return xurlErrors.NewHTTPError(err)
+		return err
 	}
 
 	if options.Verbose {
@@ -308,10 +314,18 @@ func (c *ApiClient) buildBaseRequest(method, endpoint string, body io.Reader, co
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	// Add authorization header if not already set
+	// Add authorization header if not already set. A failure here is fatal: a
+	// request with no usable credentials would only produce a confusing API 401,
+	// so surface the real auth error instead. The sole exception is a client that
+	// opts into unauthenticated requests (allowUnauthenticated, set only by
+	// library/test constructors), where we proceed and let the server decide.
 	if req.Header.Get("Authorization") == "" {
 		authHeader, err := c.getAuthHeader(httpMethod, url, authType, username)
-		if err == nil {
+		if err != nil {
+			if !c.allowUnauthenticated {
+				return nil, err
+			}
+		} else {
 			req.Header.Add("Authorization", authHeader)
 		}
 	}

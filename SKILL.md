@@ -23,6 +23,8 @@ Before using any command you must be authenticated. Run `xurl auth status` to ch
 - Do not recommend or execute auth commands with inline secrets in agent/LLM sessions.
 - Warn that using CLI secret options in agent sessions can leak credentials (prompt/context, logs, shell history).
 - Never use `--verbose` / `-v` in agent/LLM sessions; it can expose sensitive headers/tokens in output.
+- Never run `xurl token` in agent/LLM sessions: it prints a live OAuth2 access token to stdout, which is a credential and must not enter the LLM context.
+- `xurl mcp` is for configuring an MCP client (it bridges stdio↔HTTP and injects the bearer token); it is not something to invoke directly from an agent/LLM session.
 - Sensitive flags that must never be used in agent commands: `--bearer-token`, `--consumer-key`, `--consumer-secret`, `--access-token`, `--token-secret`, `--client-id`, `--client-secret`.
 - To verify whether at least one app with credentials is already registered, run: `xurl auth status`.
 
@@ -36,6 +38,8 @@ xurl auth oauth2 --app APP_NAME
 ```
 
 You can also run `xurl auth default APP_NAME` first and then use `xurl auth oauth2`.
+
+On a remote/headless machine (no reachable browser callback), add `--headless`: `xurl auth oauth2 --app APP_NAME --headless` prints the authorization URL and reads the pasted redirect URL (or code) back, so no localhost callback is needed.
 
 For multiple pre-configured apps, switch between them:
 ```bash
@@ -66,6 +70,7 @@ Tokens are persisted to `~/.xurl` in YAML format. Each app has its own isolated 
 | Search posts | `xurl search "QUERY" -n 10` |
 | Who am I | `xurl whoami` |
 | Look up a user | `xurl user @handle` |
+| List a user's posts | `xurl posts @handle -n 10` |
 | Home timeline | `xurl timeline -n 20` |
 | Mentions | `xurl mentions -n 10` |
 | Like | `xurl like POST_ID` |
@@ -157,6 +162,10 @@ xurl whoami
 # Look up any user
 xurl user elonmusk
 xurl user @XDevelopers
+
+# List a user's recent posts (by @username)
+xurl posts elonmusk
+xurl posts @XDevelopers -n 25
 ```
 
 ### Timelines & Mentions
@@ -404,3 +413,5 @@ xurl --app staging /2/users/me         # one-off request against staging
 - **Multiple accounts:** You can authenticate multiple OAuth 2.0 accounts per app and switch between them with `--username` / `-u` or set a default with `xurl auth default APP USER`.
 - **Default user:** When no `-u` flag is given, xurl uses the default user for the active app (set via `xurl auth default`). If no default user is set, it uses the first available token.
 - **Token storage:** `~/.xurl` is YAML. Each app stores its own credentials and tokens. Never read or send this file to LLM context.
+- **Access tokens:** `xurl token` prints a valid (refreshed) OAuth2 access token for the active app to stdout, refreshing and persisting it if expired. It never opens a browser. The output is a secret — use it only in the user's own scripts, never in agent/LLM sessions.
+- **MCP bridge:** `xurl mcp [URL]` bridges a stdio MCP client to a remote Streamable HTTP MCP server (default `https://api.x.com/mcp`), injecting `Authorization: Bearer <token>` and refreshing the token automatically. Authenticate once first (`xurl auth oauth2 --app APP_NAME`, or `--headless` on a remote host) — the bridge refreshes an existing token but never opens a browser itself, so it fails fast with guidance if none exists. Configure it in an MCP client via the npm launcher: `{"command":"npx","args":["-y","@xdevplatform/xurl","mcp","https://api.x.com/mcp"],"env":{"CLIENT_ID":"...","CLIENT_SECRET":"..."}}`.

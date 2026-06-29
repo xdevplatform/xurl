@@ -28,15 +28,18 @@ func ExecuteStreamRequest(options RequestOptions, client Client) error {
 	return nil
 }
 
-// handleRequestError processes API client errors in a consistent way
+// handleRequestError processes API client errors in a consistent way. When the
+// error carries a JSON body (an API error response) it is pretty-printed and a
+// generic failure is returned; otherwise the original error (e.g. a network or
+// auth failure) is returned unchanged so its real message reaches the user.
 func handleRequestError(clientErr error) error {
 	var rawJSON json.RawMessage
-	json.Unmarshal([]byte(clientErr.Error()), &rawJSON)
-	utils.FormatAndPrintResponse(rawJSON)
-	return fmt.Errorf("request failed")
+	if json.Unmarshal([]byte(clientErr.Error()), &rawJSON) == nil {
+		utils.FormatAndPrintResponse(rawJSON)
+		return fmt.Errorf("request failed")
+	}
+	return clientErr
 }
-
-// formatAndPrintResponse formats and prints API responses
 
 // HandleRequest determines the type of request and executes it accordingly
 func HandleRequest(options RequestOptions, forceStream bool, mediaFile string, client Client) error {

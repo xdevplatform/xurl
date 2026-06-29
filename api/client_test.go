@@ -342,6 +342,44 @@ func TestGetAuthHeader(t *testing.T) {
 	})
 }
 
+func TestBuildRequestPropagatesAuthError(t *testing.T) {
+	cfg := &config.Config{APIBaseURL: "https://api.x.com"}
+	tokenStore, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+
+	// Auth object with a token store that has no bearer token.
+	a := auth.NewAuth(&config.Config{}).WithTokenStore(tokenStore)
+	client := NewApiClient(cfg, a)
+
+	// Explicit app (bearer) auth with no bearer token must fail the build
+	// rather than silently producing an unauthenticated request.
+	_, err := client.BuildRequest(RequestOptions{Method: "GET", Endpoint: "/2/users/me", AuthType: "app"})
+	assert.Error(t, err)
+	assert.True(t, xurlErrors.IsAuthError(err), "expected an auth error")
+}
+
+func TestBuildRequestAllowUnauthenticatedProceeds(t *testing.T) {
+	cfg := &config.Config{APIBaseURL: "https://api.x.com"}
+	// A client that explicitly opts into unauthenticated requests (library/test
+	// usage) must build without error and with no Authorization header.
+	client := &ApiClient{url: cfg.APIBaseURL, client: &http.Client{}, allowUnauthenticated: true}
+
+	req, err := client.BuildRequest(RequestOptions{Method: "GET", Endpoint: "/2/users/me"})
+	require.NoError(t, err)
+	assert.Empty(t, req.Header.Get("Authorization"))
+}
+
+func TestBuildRequestErrorsWithoutAuthOptIn(t *testing.T) {
+	cfg := &config.Config{APIBaseURL: "https://api.x.com"}
+	// Without opting in, a client that cannot resolve any credential must fail
+	// the build rather than silently send an unauthenticated request.
+	client := NewApiClient(cfg, nil)
+
+	_, err := client.BuildRequest(RequestOptions{Method: "GET", Endpoint: "/2/users/me"})
+	assert.Error(t, err)
+	assert.True(t, xurlErrors.IsAuthError(err), "expected an auth error")
+}
+
 func TestStreamRequest(t *testing.T) {
 	// This is a basic test for the StreamRequest method
 	// A more comprehensive test would require mocking the streaming response

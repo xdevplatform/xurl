@@ -69,7 +69,12 @@ async function install() {
   if (ext === "tar.gz") {
     execSync(`tar xzf "${archivePath}" -C "${tmpDir}"`);
   } else {
-    execSync(`unzip -o "${archivePath}" -d "${tmpDir}"`);
+    // Windows releases are .zip. Extract with PowerShell's Expand-Archive,
+    // which is built into Windows, instead of the Unix `unzip` command (which
+    // isn't present on Windows and broke `npm install -g` there).
+    execSync(
+      `powershell -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${tmpDir}' -Force"`
+    );
   }
 
   const binaryName = plat === "Windows" ? "xurl.exe" : "xurl";

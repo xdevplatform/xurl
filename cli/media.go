@@ -45,18 +45,18 @@ func createMediaUploadCmd(auth *auth.Auth) *cobra.Command {
 			config := config.NewConfig()
 			client := api.NewApiClient(config, auth)
 
-			err := api.ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username, verbose, trace, waitForProcessing, headers, client)
+			err := api.ExecuteMediaUpload(filePath, mediaType, mediaCategory, authType, username, verbose, waitForProcessing, trace, headers, client)
 			if err != nil {
-				fmt.Printf("\033[31m%v\033[0m\n", err)
+				fmt.Fprintf(os.Stderr, "\033[31m%v\033[0m\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 
-	cmd.Flags().StringVar(&mediaType, "media-type", "video/mp4", "Media type (e.g., image/jpeg, image/png, video/mp4)")
-	cmd.Flags().StringVar(&mediaCategory, "category", "amplify_video", "Media category (e.g., tweet_image, tweet_video, amplify_video)")
+	cmd.Flags().StringVar(&mediaType, "media-type", "", "Media MIME type (auto-detected from the file extension if omitted)")
+	cmd.Flags().StringVar(&mediaCategory, "category", "", "Media category (derived from the media type if omitted)")
 	cmd.Flags().BoolVar(&waitForProcessing, "wait", true, "Wait for media processing to complete")
-	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
+	cmd.Flags().String("auth", "", "Authentication type (oauth1, oauth2, or app)")
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	cmd.Flags().BoolP("trace", "t", false, "Add trace header to request")
@@ -85,13 +85,13 @@ func createMediaStatusCmd(auth *auth.Auth) *cobra.Command {
 
 			err := api.ExecuteMediaStatus(mediaID, authType, username, verbose, wait, trace, headers, client)
 			if err != nil {
-				fmt.Printf("\033[31m%v\033[0m\n", err)
+				fmt.Fprintf(os.Stderr, "\033[31m%v\033[0m\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 
-	cmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
+	cmd.Flags().String("auth", "", "Authentication type (oauth1, oauth2, or app)")
 	cmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	cmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	cmd.Flags().BoolP("wait", "w", false, "Wait for media processing to complete")

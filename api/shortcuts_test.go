@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -280,4 +283,65 @@ func TestLookupUser(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp, &result))
 	assert.Equal(t, "100", result.Data.ID)
 	assert.Equal(t, "lookedup", result.Data.Username)
+}
+
+// ---- SendDM ----
+
+func TestSendDMEscapesText(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":{"dm_event_id":"1"}}`))
+	}))
+	defer server.Close()
+	client := shortcutClient(t, server)
+
+	// Text with quotes, a backslash, and a newline would corrupt naive string
+	// interpolation; json.Marshal must round-trip it intact.
+	tricky := "He said \"hi\"\nC:\\temp\tend"
+	_, err := SendDM(client, "123", tricky, baseTestOpts())
+	require.NoError(t, err)
+
+	var parsed struct {
+		Text string `json:"text"`
+	}
+	require.NoError(t, json.Unmarshal(gotBody, &parsed), "DM body must be valid JSON")
+	assert.Equal(t, tricky, parsed.Text)
+}
+
+// ---- max-results clamping ----
+
+func TestMaxResultsClamping(t *testing.T) {
+	var lastQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+	client := shortcutClient(t, server)
+
+	maxResultsOf := func() int {
+		n, _ := strconv.Atoi(lastQuery.Get("max_results"))
+		return n
+	}
+
+	_, err := GetFollowers(client, "1", 5000, baseTestOpts())
+	require.NoError(t, err)
+	assert.Equal(t, 1000, maxResultsOf(), "followers should clamp to 1000")
+
+	// Timeline (reverse_chronological) accepts a minimum of 1.
+	_, err = GetTimeline(client, "1", 1, baseTestOpts())
+	require.NoError(t, err)
+	assert.Equal(t, 1, maxResultsOf(), "timeline minimum is 1")
+
+	// Mentions requires a minimum of 5.
+	_, err = GetMentions(client, "1", 1, baseTestOpts())
+	require.NoError(t, err)
+	assert.Equal(t, 5, maxResultsOf(), "mentions should clamp up to 5")
+
+	_, err = GetDMEvents(client, 999, baseTestOpts())
+	require.NoError(t, err)
+	assert.Equal(t, 100, maxResultsOf(), "dm events should clamp to 100")
 }

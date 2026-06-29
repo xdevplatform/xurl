@@ -7,7 +7,10 @@ PROGRAM_NAME="xurl"
 
 # Install to ~/.local/bin by default (no sudo needed).
 # Falls back to /usr/local/bin if run as root.
-if [ "$EUID" -eq 0 ]; then
+# Use `id -u` rather than `$EUID`: $EUID is bash-only and expands to empty under
+# POSIX shells (e.g. dash, the default /bin/sh on Debian/Ubuntu), which silently
+# picks the user path even when run as root via `curl ... | sh`.
+if [ "$(id -u)" -eq 0 ]; then
     INSTALL_DIR="/usr/local/bin"
 else
     INSTALL_DIR="${HOME}/.local/bin"

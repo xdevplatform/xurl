@@ -39,7 +39,7 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 	webhookStartCmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start a local webhook server with an ngrok tunnel",
-		Long:  `Starts a local HTTP server and an ngrok tunnel to listen for X API webhook events, including CRC checks. POST request bodies can be saved to a file using the -o flag. Use -q for quieter console logging of POST events. Use -p to pretty-print JSON POST bodies in the console.`,
+		Long:  `Starts a local HTTP server and an ngrok tunnel to listen for X API webhook events, including CRC checks. POST request bodies can be saved to a file using the -o flag. Use -q for quieter console logging of POST events. Use -P to pretty-print JSON POST bodies in the console.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			color.Cyan("Starting webhook server with ngrok...")
 
@@ -102,7 +102,8 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 			fmt.Printf("  Forwarding URL: %s -> %s\n", color.HiGreenString(ngrokListener.URL()), color.MagentaString(forwardToAddr))
 			color.Yellow("Use this URL for your X API webhook registration: %s/webhook", color.HiGreenString(ngrokListener.URL()))
 
-			http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					crcToken := r.URL.Query().Get("crc_token")
 					if crcToken == "" {
@@ -172,7 +173,7 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 			})
 
 			color.Cyan("Starting local HTTP server to handle requests from ngrok tunnel (forwarded from %s)...", color.HiGreenString(ngrokListener.URL()))
-			if err := http.Serve(ngrokListener, nil); err != nil {
+			if err := http.Serve(ngrokListener, mux); err != nil {
 				if err != http.ErrServerClosed {
 					color.Red("HTTP server error: %v", err)
 					os.Exit(1)

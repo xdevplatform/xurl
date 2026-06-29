@@ -68,6 +68,18 @@ func ResolveUsername(input string) string {
 	return strings.TrimPrefix(strings.TrimSpace(input), "@")
 }
 
+// clampResults bounds a requested result count to the inclusive [lo, hi]
+// range the corresponding X API endpoint accepts.
+func clampResults(n, lo, hi int) int {
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
+}
+
 // ------------------------------------------------
 // Shortcut executors
 // ------------------------------------------------
@@ -163,11 +175,7 @@ func SearchPosts(client Client, query string, maxResults int, opts RequestOption
 	q := url.QueryEscape(query)
 
 	// X API enforces min 10 / max 100 for search
-	if maxResults < 10 {
-		maxResults = 10
-	} else if maxResults > 100 {
-		maxResults = 100
-	}
+	maxResults = clampResults(maxResults, 10, 100)
 
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/tweets/search/recent?query=%s&max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name,verified", q, maxResults)
@@ -179,7 +187,7 @@ func SearchPosts(client Client, query string, maxResults int, opts RequestOption
 // GetMe fetches the authenticated user's profile.
 func GetMe(client Client, opts RequestOptions) (json.RawMessage, error) {
 	opts.Method = "GET"
-	opts.Endpoint = "/2/users/me?user.fields=created_at,description,public_metrics,verified,profile_image_url"
+	opts.Endpoint = "/2/users/me?user.fields=created_at,description,public_metrics,verified,verified_type,subscription_type,profile_image_url"
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -190,7 +198,7 @@ func LookupUser(client Client, username string, opts RequestOptions) (json.RawMe
 	username = ResolveUsername(username)
 
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/by/username/%s?user.fields=created_at,description,public_metrics,verified,profile_image_url", username)
+	opts.Endpoint = fmt.Sprintf("/2/users/by/username/%s?user.fields=created_at,description,public_metrics,verified,verified_type,subscription_type,profile_image_url", username)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -198,6 +206,7 @@ func LookupUser(client Client, username string, opts RequestOptions) (json.RawMe
 
 // GetUserPosts fetches recent posts by a user ID.
 func GetUserPosts(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 5, 100)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/tweets?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=referenced_tweets.id", userID, maxResults)
 	opts.Data = ""
@@ -208,6 +217,7 @@ func GetUserPosts(client Client, userID string, maxResults int, opts RequestOpti
 // GetTimeline fetches the authenticated user's reverse‑chronological timeline.
 // Route: GET /2/users/{id}/timelines/reverse_chronological
 func GetTimeline(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 1, 100)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/timelines/reverse_chronological?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
 	opts.Data = ""
@@ -217,6 +227,7 @@ func GetTimeline(client Client, userID string, maxResults int, opts RequestOptio
 
 // GetMentions fetches recent mentions for a user.
 func GetMentions(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 5, 100)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/mentions?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
 	opts.Data = ""
@@ -298,6 +309,7 @@ func Unbookmark(client Client, userID, postID string, opts RequestOptions) (json
 
 // GetBookmarks fetches the authenticated user's bookmarks.
 func GetBookmarks(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 1, 100)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/bookmarks?max_results=%d&tweet.fields=created_at,public_metrics,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
 	opts.Data = ""
@@ -327,6 +339,7 @@ func UnfollowUser(client Client, sourceUserID, targetUserID string, opts Request
 
 // GetFollowing fetches users that a given user follows.
 func GetFollowing(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 1, 1000)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/following?max_results=%d&user.fields=created_at,description,public_metrics,verified", userID, maxResults)
 	opts.Data = ""
@@ -336,6 +349,7 @@ func GetFollowing(client Client, userID string, maxResults int, opts RequestOpti
 
 // GetFollowers fetches followers of a given user.
 func GetFollowers(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 1, 1000)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/followers?max_results=%d&user.fields=created_at,description,public_metrics,verified", userID, maxResults)
 	opts.Data = ""
@@ -345,17 +359,23 @@ func GetFollowers(client Client, userID string, maxResults int, opts RequestOpti
 
 // SendDM sends a direct message to a user.
 func SendDM(client Client, participantID, text string, opts RequestOptions) (json.RawMessage, error) {
-	body := fmt.Sprintf(`{"text":"%s"}`, strings.ReplaceAll(text, `"`, `\"`))
+	data, err := json.Marshal(struct {
+		Text string `json:"text"`
+	}{Text: text})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal DM body: %w", err)
+	}
 
 	opts.Method = "POST"
 	opts.Endpoint = fmt.Sprintf("/2/dm_conversations/with/%s/messages", participantID)
-	opts.Data = body
+	opts.Data = string(data)
 
 	return client.SendRequest(opts)
 }
 
 // GetDMEvents fetches recent DM events.
 func GetDMEvents(client Client, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 1, 100)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/dm_events?max_results=%d&dm_event.fields=created_at,dm_conversation_id,sender_id,text&expansions=sender_id&user.fields=username,name", maxResults)
 	opts.Data = ""
@@ -365,6 +385,7 @@ func GetDMEvents(client Client, maxResults int, opts RequestOptions) (json.RawMe
 
 // GetLikedPosts fetches posts liked by a user.
 func GetLikedPosts(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
+	maxResults = clampResults(maxResults, 5, 100)
 	opts.Method = "GET"
 	opts.Endpoint = fmt.Sprintf("/2/users/%s/liked_tweets?max_results=%d&tweet.fields=created_at,public_metrics,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
 	opts.Data = ""
