@@ -568,22 +568,47 @@ func TestMCPBridgeNotificationNotHeadOfLineBlocked(t *testing.T) {
 	assertStdoutIsJSONLines(t, out.String())
 }
 
-// TestMCPBridgeBootstrapFailsFastWithoutToken verifies the bridge does NOT try
-// to launch a browser when no token exists; it fails fast with guidance to
-// authenticate out-of-band (including the --headless option).
-func TestMCPBridgeBootstrapFailsFastWithoutToken(t *testing.T) {
-	tempDir := t.TempDir()
+// newTokenlessBridge builds a bridge whose store holds no OAuth2 token, with the
+// browser login stubbed so bootstrap never opens a real browser.
+func newTokenlessBridge(t *testing.T, flow func(string) (string, error)) *mcpBridge {
+	t.Helper()
 	ts := &store.TokenStore{
 		Apps:       map[string]*store.App{"default": {OAuth2Tokens: map[string]store.Token{}}},
 		DefaultApp: "default",
-		FilePath:   filepath.Join(tempDir, ".xurl"),
+		FilePath:   filepath.Join(t.TempDir(), ".xurl"),
 	}
 	a := auth.NewAuth(&config.Config{}).WithTokenStore(ts)
 	b := newMCPBridgeWithIO("http://127.0.0.1:0", a, "", strings.NewReader(""), &bytes.Buffer{})
+	b.oauth2Flow = flow
+	return b
+}
 
+// TestMCPBridgeBootstrapSkipsLoginWithToken verifies a cached token short-circuits
+// bootstrap without invoking the browser login.
+func TestMCPBridgeBootstrapSkipsLoginWithToken(t *testing.T) {
+	a := mcpTestAuth(t, "tok")
+	b := newMCPBridgeWithIO("http://127.0.0.1:0", a, "", strings.NewReader(""), &bytes.Buffer{})
+	called := false
+	b.oauth2Flow = func(string) (string, error) { called = true; return "", nil }
+	require.NoError(t, b.bootstrap())
+	assert.False(t, called)
+}
+
+// TestMCPBridgeBootstrapRunsLoginWithoutToken verifies bootstrap runs the browser
+// login when no token is cached and proceeds once it succeeds.
+func TestMCPBridgeBootstrapRunsLoginWithoutToken(t *testing.T) {
+	called := false
+	b := newTokenlessBridge(t, func(string) (string, error) { called = true; return "new-token", nil })
+	require.NoError(t, b.bootstrap())
+	assert.True(t, called)
+}
+
+// TestMCPBridgeBootstrapSurfacesLoginFailure verifies a failed login is reported
+// with guidance to authenticate out-of-band.
+func TestMCPBridgeBootstrapSurfacesLoginFailure(t *testing.T) {
+	b := newTokenlessBridge(t, func(string) (string, error) { return "", io.ErrUnexpectedEOF })
 	err := b.bootstrap()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "xurl auth oauth2")
 	assert.Contains(t, err.Error(), "--headless")
 }
 
