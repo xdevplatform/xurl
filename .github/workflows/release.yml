@@ -4,20 +4,33 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish to npm (e.g. 1.2.0, no leading v). Use this to (re)publish npm without re-running GoReleaser."
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  goreleaser:
+    # Build binaries, create the GitHub release, and update the Homebrew cask.
+    # Runs only on a tag push; npm publishing is a separate job so an npm-side
+    # failure never blocks the GitHub release / Homebrew cask, and so npm can be
+    # (re)published independently via workflow_dispatch.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: "1.24"
 
@@ -33,29 +46,45 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+  publish-npm:
+    # Publishes the npm launcher. Runs after a successful GoReleaser on a tag
+    # push, and can also be triggered manually (workflow_dispatch) to publish or
+    # re-publish a specific version without re-running GoReleaser.
+    needs: [goreleaser]
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.goreleaser.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # enables npm provenance, and OIDC trusted publishing if configured
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node >= 22.14 is required for OIDC trusted publishing.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "24"
 
-      - name: Update npm package version
+      # npm >= 11.5 is required for OIDC trusted publishing. Deliberately no
+      # registry-url / NODE_AUTH_TOKEN: a configured token (even an empty one)
+      # makes npm take the token auth path instead of OIDC. With none set, npm
+      # authenticates with the OIDC id-token against the trusted publisher
+      # configured on npmjs.com -- nothing to expire or rotate.
+      - name: Use latest npm
+        run: npm install -g npm@latest
+
+      - name: Resolve version
+        id: ver
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm (OIDC trusted publishing)
+        run: |
           cd npm
-          npm version "$VERSION" --no-git-tag-version
-
-      - name: Unpublish npm version if it exists
-        continue-on-error: true
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          npm unpublish "@xdevplatform/xurl@${VERSION}" --registry=https://registry.npmjs.org
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish to npm
-        run: |
-          cd npm
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version
+          npm publish --provenance --access public
