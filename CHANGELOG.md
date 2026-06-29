@@ -2,6 +2,12 @@
 
 All user-visible bugs and enhancements should be recorded here.
 
+## v1.2.2 - 2026-06-29
+
+### Fixed
+
+- [2026-06-29] `mcp --help` no longer contradicts the bridge's behavior. The v1.2.1 help text still said the bridge "never opens a browser itself; if no token exists it exits with that instruction", but v1.2.1 changed the bridge to open the browser for a first-run OAuth2 login when no token is cached. The help now documents that, and points remote/headless hosts to `xurl auth oauth2 [--app NAME] --headless`.
+
 ## v1.2.1 - 2026-06-29
 
 ### Changed
