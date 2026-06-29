@@ -277,12 +277,7 @@ If no token is available (and none can be refreshed), it exits non-zero with a h
 
 `xurl mcp` turns xurl into a [Model Context Protocol](https://modelcontextprotocol.io) bridge for the hosted X API MCP server. It reads newline-delimited JSON-RPC from stdin, relays each message to a remote Streamable HTTP MCP endpoint with an `Authorization: Bearer <token>` header, and writes the server's responses (plain JSON or `text/event-stream`) back to stdout as newline-delimited JSON. The MCP session id is maintained automatically and the token is refreshed in-process as it expires.
 
-Because X's OAuth requires your own app (there is no dynamic client registration), xurl holds the app identity and mints/refreshes the token. **Authenticate once before starting the bridge** — `xurl mcp` will refresh an expired token automatically but never opens a browser itself (its stdio is the MCP channel), so it fails fast with instructions if no token exists:
-
-```bash
-xurl auth oauth2 --app my-app             # local machine with a browser
-xurl auth oauth2 --app my-app --headless  # remote/headless machine
-```
+Because X's OAuth requires your own app (there is no dynamic client registration), xurl holds the app identity and mints/refreshes the token. On first run with no cached token, the bridge opens the browser for a one-time OAuth2 login using the `CLIENT_ID`/`CLIENT_SECRET` from its environment, then caches and auto-refreshes the token for subsequent runs. The MCP handshake is held until that login completes, so give the server a generous `startup_timeout_sec`.
 
 Use it directly from any MCP client (Claude Desktop, Cursor, etc.) with a standard MCP server config — no separate install step is needed thanks to the npm launcher:
 
@@ -292,11 +287,14 @@ Use it directly from any MCP client (Claude Desktop, Cursor, etc.) with a standa
     "xapi": {
       "command": "npx",
       "args": ["-y", "@xdevplatform/xurl", "mcp", "https://api.x.com/mcp"],
-      "env": { "CLIENT_ID": "...", "CLIENT_SECRET": "..." }
+      "env": { "CLIENT_ID": "...", "CLIENT_SECRET": "..." },
+      "startup_timeout_sec": 300
     }
   }
 }
 ```
+
+Requirements for the first-run browser login: a browser on the machine running the client, and your X app must have the OAuth2 redirect URI `http://localhost:8080/callback` registered (or set `REDIRECT_URI` to one that is). On a headless host with no reachable browser, authenticate out-of-band first with `xurl auth oauth2 --headless` (the bridge then just reuses the cached token).
 
 The `<url>` positional is optional and defaults to `https://api.x.com/mcp`. `--app` is honored, so you can point a client at a specific registered app:
 

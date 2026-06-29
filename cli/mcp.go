@@ -60,6 +60,11 @@ type mcpBridge struct {
 	username   string
 	httpClient *http.Client
 
+	// oauth2Flow obtains a token via the interactive browser login when none is
+	// cached. It is a field rather than a direct call so tests can substitute a
+	// stub for the real browser flow.
+	oauth2Flow func(username string) (string, error)
+
 	// tokenMu serialises all access to the (mutex-less) token store, so the
 	// message loop and the server->client listener never refresh/persist
 	// concurrently (which would be a fatal map race and could corrupt ~/.xurl).
@@ -82,9 +87,10 @@ func newMCPBridge(url string, a *auth.Auth, username string) *mcpBridge {
 
 func newMCPBridgeWithIO(url string, a *auth.Auth, username string, in io.Reader, out io.Writer) *mcpBridge {
 	return &mcpBridge{
-		url:      url,
-		auth:     a,
-		username: username,
+		url:        url,
+		auth:       a,
+		username:   username,
+		oauth2Flow: a.OAuth2Flow,
 		// No client timeout: SSE responses and the server->client stream are
 		// long-lived; cancellation is driven by the request context instead.
 		httpClient:   &http.Client{},
@@ -110,19 +116,22 @@ func (b *mcpBridge) forceRefreshToken() (string, error) {
 	return b.auth.ForceRefreshOAuth2Token(b.username)
 }
 
-// bootstrap ensures a usable token exists before bridging. It will silently
-// refresh an expired token, but it never launches a browser: the bridge's stdio
-// is the MCP channel (owned by the client) and a login prompt mid-startup would
-// hang the client's handshake and corrupt stdout. If no token is available it
-// fails fast with instructions to authenticate out-of-band first.
+// bootstrap ensures a usable token exists before bridging. It refreshes an
+// expired token; if none is cached it runs the interactive browser login and
+// blocks until that completes, so the bridge never starts serving without
+// credentials. The login writes only to stderr, keeping the stdout JSON-RPC
+// channel clean.
 func (b *mcpBridge) bootstrap() error {
 	if _, err := b.accessToken(); err == nil {
 		return nil
 	}
-	hint := appFlagHint(b.auth.AppName())
-	return fmt.Errorf("no valid OAuth2 token for this app. Authenticate first, then start the MCP server:\n"+
-		"  xurl auth oauth2%s             # local machine with a browser\n"+
-		"  xurl auth oauth2%s --headless  # remote/headless machine (paste a code)", hint, hint)
+	b.logf("no valid OAuth2 token; opening the browser to sign in -- complete the login to start the bridge...")
+	if _, err := b.oauth2Flow(b.username); err != nil {
+		hint := appFlagHint(b.auth.AppName())
+		return fmt.Errorf("authentication failed: %w\n(on a headless machine, run `xurl auth oauth2%s --headless` first)", err, hint)
+	}
+	b.logf("authentication complete; starting bridge")
+	return nil
 }
 
 // run reads JSON-RPC messages from stdin and bridges them until stdin closes or

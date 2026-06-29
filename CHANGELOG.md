@@ -2,6 +2,12 @@
 
 All user-visible bugs and enhancements should be recorded here.
 
+## v1.2.1 - 2026-06-29
+
+### Changed
+
+- [2026-06-29] `mcp` bridge now runs the interactive browser OAuth2 login on first run when no token is cached (using `CLIENT_ID`/`CLIENT_SECRET` from its environment), instead of failing fast. This lets the bridge authenticate with no prior xurl setup — e.g. straight from `npx … mcp` — and then caches/auto-refreshes the token. The MCP handshake is held until the login completes (set a generous `startup_timeout_sec` on the server), and login diagnostics stay on stderr so the stdout JSON-RPC channel is unaffected. On a headless host, authenticate out-of-band first with `xurl auth oauth2 --headless`.
+
 ## v1.2.0 - 2026-06-29
 
 ### Fixed
