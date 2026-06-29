@@ -736,10 +736,11 @@ session id is maintained across requests.
 
 The access token is resolved exactly like 'xurl token': an existing token is
 refreshed automatically as it expires (including a forced refresh on a 401).
-Authenticate once before starting the bridge with 'xurl auth oauth2 [--app NAME]'
-(add --headless on a remote/headless machine). The bridge never opens a browser
-itself; if no token exists it exits with that instruction. All diagnostics go to
-stderr so stdout stays a clean JSON-RPC channel.
+If no token is cached, the bridge opens the browser for an interactive OAuth2
+login on startup and blocks until it completes, so a first run needs no separate
+'xurl auth oauth2' step. On a remote/headless machine without a browser,
+authenticate first with 'xurl auth oauth2 [--app NAME] --headless'. All
+diagnostics go to stderr so stdout stays a clean JSON-RPC channel.
 
 If URL is omitted it defaults to ` + defaultMCPURL + `.
 
