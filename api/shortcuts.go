@@ -187,7 +187,7 @@ func SearchPosts(client Client, query string, maxResults int, opts RequestOption
 // GetMe fetches the authenticated user's profile.
 func GetMe(client Client, opts RequestOptions) (json.RawMessage, error) {
 	opts.Method = "GET"
-	opts.Endpoint = "/2/users/me?user.fields=created_at,description,public_metrics,verified,profile_image_url"
+	opts.Endpoint = "/2/users/me?user.fields=created_at,description,public_metrics,verified,verified_type,subscription_type,profile_image_url"
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -198,7 +198,7 @@ func LookupUser(client Client, username string, opts RequestOptions) (json.RawMe
 	username = ResolveUsername(username)
 
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/by/username/%s?user.fields=created_at,description,public_metrics,verified,profile_image_url", username)
+	opts.Endpoint = fmt.Sprintf("/2/users/by/username/%s?user.fields=created_at,description,public_metrics,verified,verified_type,subscription_type,profile_image_url", username)
 	opts.Data = ""
 
 	return client.SendRequest(opts)

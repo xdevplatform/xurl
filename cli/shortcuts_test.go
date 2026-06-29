@@ -39,7 +39,7 @@ func (f fakeClient) SendMultipartRequest(options api.MultipartOptions) (json.Raw
 func TestResolveMyUserIDUsesUsernameFallback(t *testing.T) {
 	client := fakeClient{
 		sendRequest: func(options api.RequestOptions) (json.RawMessage, error) {
-			require.Equal(t, "/2/users/by/username/alice?user.fields=created_at,description,public_metrics,verified,profile_image_url", options.Endpoint)
+			require.Equal(t, "/2/users/by/username/alice?user.fields=created_at,description,public_metrics,verified,verified_type,subscription_type,profile_image_url", options.Endpoint)
 			return json.RawMessage(`{"data":{"id":"42"}}`), nil
 		},
 	}
@@ -52,7 +52,7 @@ func TestResolveMyUserIDUsesUsernameFallback(t *testing.T) {
 func TestResolveMyUserIDReturnsHelpfulErrorWhenGetMeFails(t *testing.T) {
 	client := fakeClient{
 		sendRequest: func(options api.RequestOptions) (json.RawMessage, error) {
-			require.Equal(t, "/2/users/me?user.fields=created_at,description,public_metrics,verified,profile_image_url", options.Endpoint)
+			require.Equal(t, "/2/users/me?user.fields=created_at,description,public_metrics,verified,verified_type,subscription_type,profile_image_url", options.Endpoint)
 			return nil, fmt.Errorf("boom")
 		},
 	}
