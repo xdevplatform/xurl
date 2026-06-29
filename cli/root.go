@@ -9,47 +9,39 @@ import (
 	"github.com/xdevplatform/xurl/api"
 	"github.com/xdevplatform/xurl/auth"
 	"github.com/xdevplatform/xurl/config"
+	"github.com/xdevplatform/xurl/version"
+)
+
+// Command group IDs used to organise the help output into scannable sections.
+const (
+	groupWrite  = "write"
+	groupSocial = "social"
+	groupRead   = "read"
+	groupManage = "manage"
 )
 
 // CreateRootCommand creates the root command for the xurl CLI
 func CreateRootCommand(cfg *config.Config, a *auth.Auth) *cobra.Command {
 	var rootCmd = &cobra.Command{
-		Use:   "xurl [flags] URL",
-		Short: "Auth enabled curl-like interface for the X API",
+		Use:     "xurl [flags] URL",
+		Short:   "Auth enabled curl-like interface for the X API",
+		Version: version.Version,
 		Long: `A command-line tool for making authenticated requests to the X API.
 
-Shortcut commands (agent‑friendly):
-  xurl post "Hello world!"                        Post to X
-  xurl reply 1234567890 "Nice!"                   Reply to a post
-  xurl read 1234567890                             Read a post
-  xurl search "golang" -n 20                       Search posts
-  xurl whoami                                      Show your profile
-  xurl like 1234567890                             Like a post
-  xurl repost 1234567890                           Repost
-  xurl follow @user                                Follow a user
-  xurl dm @user "Hey!"                             Send a DM
-  xurl timeline                                    Home timeline
-  xurl mentions                                    Your mentions
+Quick start:
+  xurl post "Hello world!"                    Post to X (shortcut command)
+  xurl /2/users/me                            Raw GET request
+  xurl -X POST /2/tweets -d '{"text":"hi"}'   Raw request with a JSON body
+  xurl --auth app /2/tweets/search/stream     Pick an auth type (oauth1|oauth2|app)
+  xurl media upload photo.jpg                 Upload media (type auto-detected)
 
-Raw API access (curl‑style):
-  basic requests        xurl /2/users/me
-                        xurl -X POST /2/tweets -d '{"text":"Hello world!"}'
-                        xurl -H "Content-Type: application/json" /2/tweets
-  authentication        xurl --auth oauth2 /2/users/me
-                        xurl --auth oauth1 /2/users/me
-                        xurl --auth app /2/users/me
-  media and streaming   xurl media upload path/to/video.mp4
-                        xurl /2/tweets/search/stream --auth app
-                        xurl -s /2/users/me
-
-Multi-app management:
+Authentication:
   xurl auth apps add my-app --client-id ... --client-secret ...
-  xurl auth apps list
-  xurl auth default                                # interactive picker
-  xurl auth default my-app                         # set by name
-  xurl --app my-app /2/users/me                    # per-request override
+  xurl auth oauth2 --app my-app               Authenticate a user
+  xurl auth default my-app                    Set the default app
+  xurl --app my-app /2/users/me               Per-request app override
 
-Run 'xurl --help' to see all available commands.`,
+Commands are grouped by purpose below. Run 'xurl <command> --help' for details.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Apply --app override if provided
 			appOverride, _ := cmd.Flags().GetString("app")
@@ -61,13 +53,20 @@ Run 'xurl --help' to see all available commands.`,
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			method, _ := cmd.Flags().GetString("method")
-			if method == "" {
-				method = "GET"
-			}
-
 			headers, _ := cmd.Flags().GetStringArray("header")
 			data, _ := cmd.Flags().GetString("data")
+
+			method, _ := cmd.Flags().GetString("method")
+			if method == "" {
+				// Mirror curl: providing a request body (-d/--data) implies POST
+				// unless -X says otherwise — even for an explicitly empty body.
+				if cmd.Flags().Changed("data") {
+					method = "POST"
+				} else {
+					method = "GET"
+				}
+			}
+
 			authType, _ := cmd.Flags().GetString("auth")
 			username, _ := cmd.Flags().GetString("username")
 			verbose, _ := cmd.Flags().GetBool("verbose")
@@ -76,9 +75,9 @@ Run 'xurl --help' to see all available commands.`,
 			mediaFile, _ := cmd.Flags().GetString("file")
 
 			if len(args) == 0 {
-				fmt.Println("No URL provided")
-				fmt.Println("Usage: xurl [OPTIONS] [URL] [COMMAND]")
-				fmt.Println("Try 'xurl --help' for more information.")
+				fmt.Fprintln(os.Stderr, "No URL provided")
+				fmt.Fprintln(os.Stderr, "Usage: xurl [OPTIONS] [URL] [COMMAND]")
+				fmt.Fprintln(os.Stderr, "Try 'xurl --help' for more information.")
 				os.Exit(1)
 			}
 
@@ -98,7 +97,7 @@ Run 'xurl --help' to see all available commands.`,
 			}
 			err := api.HandleRequest(requestOptions, forceStream, mediaFile, client)
 			if err != nil {
-				fmt.Printf("\033[31mError: %v\033[0m\n", err)
+				fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
 				os.Exit(1)
 			}
 		},
@@ -107,20 +106,39 @@ Run 'xurl --help' to see all available commands.`,
 	// Global persistent flag: --app
 	rootCmd.PersistentFlags().String("app", "", "Use a specific registered app (overrides default)")
 
-	rootCmd.Flags().StringP("method", "X", "", "HTTP method (GET by default)")
+	rootCmd.Flags().StringP("method", "X", "", "HTTP method (GET by default, POST when -d is given)")
 	rootCmd.Flags().StringArrayP("header", "H", []string{}, "Request headers")
 	rootCmd.Flags().StringP("data", "d", "", "Request body data")
-	rootCmd.Flags().String("auth", "", "Authentication type (oauth1 or oauth2)")
+	rootCmd.Flags().String("auth", "", "Authentication type (oauth1, oauth2, or app)")
 	rootCmd.Flags().StringP("username", "u", "", "Username for OAuth2 authentication")
 	rootCmd.Flags().BoolP("verbose", "v", false, "Print verbose information")
 	rootCmd.Flags().BoolP("trace", "t", false, "Add trace header to request")
 	rootCmd.Flags().BoolP("stream", "s", false, "Force streaming mode for non-streaming endpoints")
 	rootCmd.Flags().StringP("file", "F", "", "File to upload (for multipart requests)")
 
-	rootCmd.AddCommand(CreateAuthCommand(a))
-	rootCmd.AddCommand(CreateMediaCommand(a))
-	rootCmd.AddCommand(CreateVersionCommand())
-	rootCmd.AddCommand(CreateWebhookCommand(a))
+	// Organise subcommands into scannable help sections.
+	rootCmd.AddGroup(
+		&cobra.Group{ID: groupWrite, Title: "Posting & Engagement:"},
+		&cobra.Group{ID: groupSocial, Title: "Users & Social Graph:"},
+		&cobra.Group{ID: groupRead, Title: "Reading & Lists:"},
+		&cobra.Group{ID: groupManage, Title: "Management:"},
+	)
+
+	authCmd := CreateAuthCommand(a)
+	mediaCmd := CreateMediaCommand(a)
+	versionCmd := CreateVersionCommand()
+	webhookCmd := CreateWebhookCommand(a)
+	tokenCmd := CreateTokenCommand(a)
+	mcpCmd := CreateMCPCommand(a)
+	for _, c := range []*cobra.Command{authCmd, mediaCmd, tokenCmd, mcpCmd, versionCmd, webhookCmd} {
+		c.GroupID = groupManage
+		rootCmd.AddCommand(c)
+	}
+
+	// Place the auto-generated help/completion commands in the Management group
+	// too, so the help screen has no ungrouped "Additional Commands" section.
+	rootCmd.SetHelpCommandGroupID(groupManage)
+	rootCmd.SetCompletionCommandGroupID(groupManage)
 
 	// Register streamlined shortcut commands (post, reply, read, search, etc.)
 	CreateShortcutCommands(rootCmd, a)

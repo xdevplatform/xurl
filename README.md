@@ -86,6 +86,14 @@ xurl auth oauth2 --app my-app
 
 If you omit `--app`, the token is saved to the current default app. You can also run `xurl auth default my-app` first and then use `xurl auth oauth2`.
 
+**Headless / remote machines.** The default flow opens a browser and waits for a callback on `localhost`, which isn't reachable from a remote server. On those hosts use `--headless`:
+
+```bash
+xurl auth oauth2 --app my-app --headless
+```
+
+xurl prints the authorization URL; open it on any device with a browser, approve, then paste the resulting redirect URL (or just the `code` value from the address bar) back into the prompt. No callback listener is needed — the page failing to load is expected; the code is in the URL.
+
 If X returns a `client-forbidden` / `client-not-enrolled` error even though auth completed successfully, check the app’s package and environment in the X developer console. On current X platform setup, the working fix was:
 
 1. Go to `Apps` -> `Manage apps`
@@ -104,10 +112,13 @@ xurl auth oauth2 --app my-app YOUR_USERNAME
 
 That keeps the OAuth2 token associated with the expected username and also gives shortcut commands a fallback when `/2/users/me` is unavailable.
 
-#### App authentication (bearer token):
+#### App-only authentication (Bearer Token):
 ```bash
-xurl auth app --bearer-token BEARER_TOKEN
+xurl auth app-only BEARER_TOKEN
+cat token.txt | xurl auth app-only -          # read from stdin (keeps it out of shell history)
 ```
+This stores X's app-only Bearer Token (from the developer portal), used at request time with `--auth app`. It's named for the auth *mode* (app-only) rather than the token *scheme* (bearer), since OAuth2 user tokens are also sent as `Authorization: Bearer`.
+> Back-compat: `xurl auth app` and `xurl auth bearer` still work as aliases, and `--bearer-token TOKEN` is still accepted.
 
 #### OAuth 1.0a authentication:
 ```bash
@@ -249,6 +260,53 @@ You can also force streaming mode for any endpoint using the `--stream` or `-s` 
 xurl -s /2/users/me
 ```
 
+### Printing an Access Token
+
+`xurl token` prints a valid OAuth2 access token for the active app to stdout (a single line, no decoration). If the stored token has expired it is refreshed and persisted first. This command never opens a browser, so it is safe to use in scripts:
+
+```bash
+xurl token                 # token for the default app/user
+xurl token --app my-app    # token for a specific app
+xurl token -u alice        # token for a specific OAuth2 user
+TOKEN=$(xurl token) && curl -H "Authorization: Bearer $TOKEN" https://api.x.com/2/users/me
+```
+
+If no token is available (and none can be refreshed), it exits non-zero with a hint to run `xurl auth oauth2`.
+
+### MCP Server (`xurl mcp`)
+
+`xurl mcp` turns xurl into a [Model Context Protocol](https://modelcontextprotocol.io) bridge for the hosted X API MCP server. It reads newline-delimited JSON-RPC from stdin, relays each message to a remote Streamable HTTP MCP endpoint with an `Authorization: Bearer <token>` header, and writes the server's responses (plain JSON or `text/event-stream`) back to stdout as newline-delimited JSON. The MCP session id is maintained automatically and the token is refreshed in-process as it expires.
+
+Because X's OAuth requires your own app (there is no dynamic client registration), xurl holds the app identity and mints/refreshes the token. **Authenticate once before starting the bridge** — `xurl mcp` will refresh an expired token automatically but never opens a browser itself (its stdio is the MCP channel), so it fails fast with instructions if no token exists:
+
+```bash
+xurl auth oauth2 --app my-app             # local machine with a browser
+xurl auth oauth2 --app my-app --headless  # remote/headless machine
+```
+
+Use it directly from any MCP client (Claude Desktop, Cursor, etc.) with a standard MCP server config — no separate install step is needed thanks to the npm launcher:
+
+```json
+{
+  "mcpServers": {
+    "xapi": {
+      "command": "npx",
+      "args": ["-y", "@xdevplatform/xurl", "mcp", "https://api.x.com/mcp"],
+      "env": { "CLIENT_ID": "...", "CLIENT_SECRET": "..." }
+    }
+  }
+}
+```
+
+The `<url>` positional is optional and defaults to `https://api.x.com/mcp`. `--app` is honored, so you can point a client at a specific registered app:
+
+```bash
+xurl --app my-app mcp                       # bridge the default endpoint using my-app
+xurl mcp https://api.x.com/mcp              # explicit endpoint
+```
+
+All diagnostics are written to stderr so stdout stays a clean JSON-RPC channel.
+
 ### Temporary Webhook Setup
 
 `xurl` can help you quickly set up a temporary webhook URL to receive events from the X API. This is useful for development and testing.
@@ -280,12 +338,13 @@ xurl -s /2/users/me
 
 The tool supports uploading media files to the X API using the chunked upload process.
 
-Upload a media file:
+Upload a media file (the media type and category are auto-detected from the file extension):
 ```bash
 xurl media upload path/to/file.mp4
+xurl media upload path/to/photo.jpg
 ```
 
-With custom media type and category:
+Override the auto-detected media type and category when needed:
 ```bash
 xurl media upload --media-type image/jpeg --category tweet_image path/to/image.jpg
 ```
@@ -302,21 +361,23 @@ xurl media status --wait MEDIA_ID
 
 #### Direct Media Upload
 
-You can also use the main command with the `-F` flag for direct media uploads:
+Most users should just use `xurl media upload` above. If you need to drive the
+chunked upload manually, use the `-F` flag with the path-style endpoints that
+`xurl media upload` itself uses:
 
 1. First, initialize the upload:
 ```bash
-xurl -X POST '/2/media/upload?command=INIT&total_bytes=FILE_SIZE&media_type=video/mp4&media_category=tweet_video'
+xurl -X POST /2/media/upload/initialize -d '{"total_bytes": FILE_SIZE, "media_type": "video/mp4", "media_category": "tweet_video"}'
 ```
 
-2. Then, append the media chunks:
+2. Then, append the media chunks (repeat with an increasing `segment_index`):
 ```bash
-xurl -X POST -F path/to/file.mp4 '/2/media/upload?command=APPEND&media_id=MEDIA_ID&segment_index=0'
+xurl -X POST -F path/to/file.mp4 /2/media/upload/MEDIA_ID/append
 ```
 
 3. Finally, finalize the upload:
 ```bash
-xurl -X POST '/2/media/upload?command=FINALIZE&media_id=MEDIA_ID'
+xurl -X POST /2/media/upload/MEDIA_ID/finalize
 ```
 
 4. Check the status:
