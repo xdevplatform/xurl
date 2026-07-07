@@ -156,6 +156,8 @@ func TestGetOAuth2Scopes(t *testing.T) {
 	// Check for some common scopes
 	assert.Contains(t, scopes, "tweet.read", "Expected 'tweet.read' scope")
 	assert.Contains(t, scopes, "users.read", "Expected 'users.read' scope")
+	assert.Contains(t, scopes, "broadcast.read", "Expected 'broadcast.read' scope")
+	assert.Contains(t, scopes, "broadcast.write", "Expected 'broadcast.write' scope")
 }
 
 func TestCredentialResolutionPriority(t *testing.T) {
