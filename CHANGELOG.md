@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Added
+
+- [2026-07-15] **Cut Release** GitHub Actions workflow (`workflow_dispatch`) to promote `CHANGELOG.md`, open/merge a release PR, tag, and publish (GitHub release, Homebrew, npm) in one run.
+
 ### Fixed
 
 - [2026-07-15] `xurl auth oauth2` no longer always warns that the "default" app has no client credentials when `--app` is omitted. The check used `GetApp("")` (empty-key map lookup, always nil) instead of the real default app, so it false-alarmed even when the active default (e.g. `app-2`) had credentials. The warning now resolves `default_app` and names that app correctly.
