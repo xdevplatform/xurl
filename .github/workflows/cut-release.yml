@@ -12,10 +12,11 @@
 # and the PR path is unnecessary for a release cut.
 #
 # Requirements:
-#   - Ruleset/branch protection must allow GitHub Actions to push to main
-#     (add "GitHub Actions" as a bypass actor on the main ruleset), OR use a
-#     fine-grained PAT in the RELEASE_GITHUB_TOKEN secret with contents:write
-#     and ruleset bypass.
+#   - Repo secret RELEASE_GITHUB_TOKEN: a PAT (or gh OAuth token) for a user who
+#     can bypass the main ruleset (org/repo admin). GITHUB_TOKEN cannot bypass
+#     rulesets — there is no "GitHub Actions" bypass actor for it.
+#   - npm is published by dispatching the existing Release workflow (release.yml),
+#     which is the OIDC trusted publisher configured on npmjs.com.
 #
 # Why publish here instead of relying on the tag-triggered Release workflow?
 # Tag pushes authenticated with GITHUB_TOKEN do not start other workflows, so
@@ -64,7 +65,7 @@ concurrency:
 
 permissions:
   contents: write
-  id-token: write # npm OIDC trusted publishing
+  actions: write # dispatch Release workflow for npm publish
 
 jobs:
   cut:
@@ -158,15 +159,11 @@ jobs:
             {
               echo "## Cut Release: push rejected"
               echo ""
-              echo "Could not push to \`main\` / \`${TAG}\`. Branch rules are blocking"
-              echo "the workflow token. Fix one of:"
-              echo ""
-              echo "1. **Ruleset bypass (recommended):** Settings → Rules → Rulesets → main"
-              echo "   → Bypass list → add **GitHub Actions** with bypass mode **Always**"
-              echo "2. **PAT secret:** create a fine-grained PAT that can bypass the"
-              echo "   ruleset, add it as repo secret \`RELEASE_GITHUB_TOKEN\`, re-run"
+              echo "Could not push to \`main\` / \`${TAG}\`. The workflow token cannot"
+              echo "bypass branch rules. Set repo secret \`RELEASE_GITHUB_TOKEN\` to a"
+              echo "PAT for an org/repo admin (who is on the ruleset bypass list), then re-run."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Push to main/${TAG} rejected by branch protection. Add GitHub Actions as a ruleset bypass actor (Always), or set RELEASE_GITHUB_TOKEN."
+            echo "::error::Push to main/${TAG} rejected. Ensure RELEASE_GITHUB_TOKEN is set to an admin PAT that can bypass the main ruleset."
             # Drop the local tag so a re-run is clean if the remote rejected it.
             git tag -d "$TAG" || true
             exit 1
@@ -184,23 +181,35 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
-      - name: Set up Node.js
+      # npm OIDC trusted publishing is bound to release.yml on npmjs.com.
+      # Publishing from this workflow file fails with ENEEDAUTH; dispatch instead.
+      - name: Publish npm via Release workflow
         if: ${{ !inputs.dry_run }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Use latest npm
-        if: ${{ !inputs.dry_run }}
-        run: npm install -g npm@latest
-
-      - name: Publish to npm (OIDC trusted publishing)
-        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          cd npm
-          npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version
-          npm publish --provenance --access public
+          VERSION="${{ steps.meta.outputs.version }}"
+          BEFORE=$(gh run list --workflow=Release --event=workflow_dispatch --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')
+          gh workflow run Release --field version="$VERSION"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            CANDIDATE=$(gh run list --workflow=Release --event=workflow_dispatch --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')
+            if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != "$BEFORE" ]; then
+              RUN_ID="$CANDIDATE"
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::Timed out waiting for Release workflow_dispatch run"
+            exit 1
+          fi
+          echo "Watching Release run ${RUN_ID} for npm ${VERSION}…"
+          gh run watch "$RUN_ID" --exit-status
 
       - name: Release summary
         if: ${{ !inputs.dry_run }}
