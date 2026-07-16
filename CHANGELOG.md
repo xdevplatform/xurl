@@ -2,6 +2,12 @@
 
 All user-visible bugs and enhancements should be recorded here.
 
+## Unreleased
+
+### Fixed
+
+- [2026-07-15] `xurl auth oauth2` no longer always warns that the "default" app has no client credentials when `--app` is omitted. The check used `GetApp("")` (empty-key map lookup, always nil) instead of the real default app, so it false-alarmed even when the active default (e.g. `app-2`) had credentials. The warning now resolves `default_app` and names that app correctly.
+
 ## v1.2.2 - 2026-06-29
 
 ### Fixed

@@ -114,32 +114,19 @@ on any device, and paste the resulting redirect URL (or code) back in.`,
 				username = args[0]
 			}
 
-			// Warn when --app is not specified and the default app has no
-			// client credentials but another registered app does.  Tokens
+			// Warn when --app is not specified and the active/default app has
+			// no client credentials but another registered app does. Tokens
 			// saved to a credential-less app cannot be refreshed, causing
 			// cryptic 401 errors on all subsequent API calls.
-			if a.AppName() == "" {
-				defaultApp := a.TokenStore.GetApp("")
-				hasCredentials := defaultApp != nil && defaultApp.ClientID != ""
-				if !hasCredentials {
-					var credentialed []string
-					for _, name := range a.TokenStore.ListApps() {
-						app := a.TokenStore.GetApp(name)
-						if app != nil && app.ClientID != "" {
-							credentialed = append(credentialed, name)
-						}
-					}
-					if len(credentialed) > 0 {
-						fmt.Fprintf(os.Stderr, "\033[33m⚠️  No --app specified. The OAuth2 token will be saved to the \"default\" app,\n")
-						fmt.Fprintf(os.Stderr, "    which has no client credentials stored. API calls will fail with 401 errors.\n\n")
-						fmt.Fprintf(os.Stderr, "    App(s) with credentials available:\n")
-						for _, name := range credentialed {
-							app := a.TokenStore.GetApp(name)
-							fmt.Fprintf(os.Stderr, "      --app %s  [client_id: %s…]\n", name, truncate(app.ClientID, 8))
-						}
-						fmt.Fprintf(os.Stderr, "\n    Run instead:  xurl auth oauth2 --app %s\n\n", credentialed[0])
-					}
+			if warn, targetName, credentialed := oauth2NoAppCredentialWarning(a.TokenStore, a.AppName()); warn {
+				fmt.Fprintf(os.Stderr, "\033[33m⚠️  No --app specified. The OAuth2 token will be saved to the %q app,\n", targetName)
+				fmt.Fprintf(os.Stderr, "    which has no client credentials stored. API calls will fail with 401 errors.\n\n")
+				fmt.Fprintf(os.Stderr, "    App(s) with credentials available:\n")
+				for _, name := range credentialed {
+					app := a.TokenStore.GetApp(name)
+					fmt.Fprintf(os.Stderr, "      --app %s  [client_id: %s…]\n", name, truncate(app.ClientID, 8))
 				}
+				fmt.Fprintf(os.Stderr, "\n    Run instead:  xurl auth oauth2 --app %s\n\n", credentialed[0])
 			}
 
 			var err error
@@ -680,6 +667,40 @@ Examples:
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
+
+// oauth2NoAppCredentialWarning reports whether to warn that an OAuth2 login
+// without --app will target an app that has no stored client credentials,
+// while at least one other registered app does.
+//
+// GetApp maps by exact name and does not resolve the empty override to the
+// default app, so callers must use GetDefaultApp (not GetApp("")).
+func oauth2NoAppCredentialWarning(ts *store.TokenStore, appOverride string) (warn bool, targetName string, credentialed []string) {
+	if appOverride != "" {
+		return false, "", nil
+	}
+
+	targetName = ts.GetDefaultApp()
+	if targetName == "" {
+		// ResolveApp would auto-create this name when saving the token.
+		targetName = "default"
+	}
+
+	target := ts.GetApp(targetName)
+	if target != nil && target.ClientID != "" {
+		return false, targetName, nil
+	}
+
+	for _, name := range ts.ListApps() {
+		app := ts.GetApp(name)
+		if app != nil && app.ClientID != "" {
+			credentialed = append(credentialed, name)
+		}
+	}
+	if len(credentialed) == 0 {
+		return false, targetName, nil
+	}
+	return true, targetName, credentialed
+}
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
