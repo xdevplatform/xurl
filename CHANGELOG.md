@@ -6,7 +6,7 @@ All user-visible bugs and enhancements should be recorded here.
 
 ### Added
 
-- [2026-07-15] **Cut Release** GitHub Actions workflow (`workflow_dispatch`) to promote `CHANGELOG.md`, open/merge a release PR, tag, and publish (GitHub release, Homebrew, npm) in one run.
+- [2026-07-15] **Cut Release** GitHub Actions workflow (`workflow_dispatch`) to promote `CHANGELOG.md`, commit + tag on `main`, and publish (GitHub release, Homebrew, npm) in one run.
 
 ### Fixed
 
