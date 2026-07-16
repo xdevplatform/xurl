@@ -4,6 +4,8 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+## v1.2.3 - 2026-07-16
+
 ### Added
 
 - [2026-07-15] **Cut Release** GitHub Actions workflow (`workflow_dispatch`) to promote `CHANGELOG.md`, commit + tag on `main`, and publish (GitHub release, Homebrew, npm) in one run.
