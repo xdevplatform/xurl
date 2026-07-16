@@ -1,0 +1,271 @@
+# Cut a release from main via workflow_dispatch.
+#
+# Steps:
+#   1. Resolve the next version (patch/minor/major, or an explicit version)
+#   2. Promote CHANGELOG.md "## Unreleased" → "## vX.Y.Z - <date>"
+#   3. Run tests
+#   4. Open a release PR (main is PR-protected), merge it when allowed
+#   5. Create and push an annotated tag
+#   6. Publish via GoReleaser (GitHub release + Homebrew) and npm
+#
+# Why publish here instead of relying on the tag-triggered Release workflow?
+# Tag pushes authenticated with GITHUB_TOKEN do not start other workflows, so
+# this job runs the publish steps itself after tagging.
+#
+# Usage (GitHub UI):
+#   Actions → Cut Release → Run workflow
+#
+# Usage (CLI):
+#   gh workflow run "Cut Release" -f bump=patch
+#   gh workflow run "Cut Release" -f version=1.2.3
+#   gh workflow run "Cut Release" -f bump=patch -f dry_run=true
+#   gh workflow run "Cut Release" -f version=1.2.3 -f skip_changelog=true
+#
+# If merge is blocked by required reviews, the workflow opens the PR and stops.
+# After the PR is approved+merged, re-run with the same version and
+# skip_changelog=true to tag and publish.
+
+name: Cut Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver bump when "version" is empty
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      version:
+        description: Explicit version (e.g. 1.2.3). Overrides bump. Optional.
+        required: false
+        type: string
+        default: ""
+      skip_changelog:
+        description: Skip CHANGELOG edits (tag + publish current main only)
+        type: boolean
+        default: false
+      dry_run:
+        description: Resolve version / validate only; no PR, tag, or publish
+        type: boolean
+        default: false
+
+# Prevent two concurrent cuts from racing on tags / CHANGELOG.
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write # npm OIDC trusted publishing
+
+jobs:
+  cut:
+    name: Cut ${{ inputs.version || inputs.bump }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Resolve version and promote changelog
+        id: meta
+        run: |
+          set -euo pipefail
+          args=(--repo . --github-output "$GITHUB_OUTPUT" --bump "${{ inputs.bump }}")
+          if [ -n "${{ inputs.version }}" ]; then
+            args+=(--version "${{ inputs.version }}")
+          fi
+          if [ "${{ inputs.skip_changelog }}" = "true" ]; then
+            args+=(--skip-changelog)
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python3 scripts/cut_release.py "${args[@]}"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## Cut Release (dry-run)"
+            echo ""
+            echo "- version: \`${{ steps.meta.outputs.version }}\`"
+            echo "- tag: \`${{ steps.meta.outputs.tag }}\`"
+            echo "- changelog_changed: \`${{ steps.meta.outputs.changelog_changed }}\`"
+            echo ""
+            echo "No PR, tag, or publish was performed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure git identity
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Open release PR (changelog)
+        id: pr
+        if: ${{ !inputs.dry_run && !inputs.skip_changelog && steps.meta.outputs.changelog_changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          BRANCH="release/${TAG}"
+
+          git checkout -B "$BRANCH"
+          git add CHANGELOG.md
+          git commit -m "chore(release): ${TAG}"
+          git push -u origin "$BRANCH" --force
+
+          if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then
+            PR_URL=$(gh pr view "$BRANCH" --json url --jq .url)
+            PR_NUMBER=$(gh pr view "$BRANCH" --json number --jq .number)
+          else
+            PR_URL=$(gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore(release): ${TAG}" \
+              --body "$(cat <<EOF
+          ## Summary
+          Promote \`CHANGELOG.md\` Unreleased notes to **${TAG}** and prepare the patch/minor/major release.
+
+          Created by the **Cut Release** workflow. After this lands on \`main\`, the same workflow tags \`${TAG}\` and publishes (GitHub release, Homebrew, npm).
+
+          ## Test plan
+          - [x] \`go test ./...\` in Cut Release workflow
+          - [ ] Confirm CHANGELOG section \`${TAG}\` looks right
+          EOF
+          )")
+            PR_NUMBER=$(gh pr view "$BRANCH" --json number --jq .number)
+          fi
+
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "url=${PR_URL}" >> "$GITHUB_OUTPUT"
+          echo "Opened ${PR_URL}"
+
+      - name: Merge release PR
+        id: merge
+        if: ${{ !inputs.dry_run && !inputs.skip_changelog && steps.meta.outputs.changelog_changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+
+          # Wait for required checks (e.g. build) before attempting merge.
+          echo "Waiting for PR checks…"
+          if ! gh pr checks "$PR_NUMBER" --watch --fail-fast; then
+            echo "::warning::PR checks did not pass; merge will likely fail until they are green"
+          fi
+
+          # Prefer a regular merge; fall back to admin merge when the token can bypass.
+          if gh pr merge "$PR_NUMBER" --squash --delete-branch; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if gh pr merge "$PR_NUMBER" --squash --delete-branch --admin; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "## Cut Release blocked on review"
+            echo ""
+            echo "Opened ${{ steps.pr.outputs.url }} but could not merge (branch protection requires review and/or checks)."
+            echo ""
+            echo "1. Approve and merge the PR"
+            echo "2. Re-run **Cut Release** with:"
+            echo "   - version: \`${{ steps.meta.outputs.version }}\`"
+            echo "   - skip_changelog: \`true\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "merged=false" >> "$GITHUB_OUTPUT"
+          echo "::error::Release PR needs approval before tagging. Merge ${{ steps.pr.outputs.url }} then re-run with version=${{ steps.meta.outputs.version }} and skip_changelog=true"
+          exit 1
+
+      # If the merge step fails (needs review), the job stops here. Re-run with
+      # skip_changelog=true after the PR is merged.
+      - name: Sync main
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git checkout main
+          git pull --ff-only origin main
+
+      - name: Create and push tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists on main"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "::error::Tag ${TAG} already exists on origin"
+            exit 1
+          fi
+
+          git tag -a "$TAG" -m "${TAG}"
+          # GITHUB_TOKEN tag pushes do not trigger other workflows (by design),
+          # so publish steps below run in this job instead of release.yml.
+          git push origin "$TAG"
+          echo "Created and pushed ${TAG} at $(git rev-parse HEAD)"
+
+      - name: Run GoReleaser
+        if: ${{ !inputs.dry_run }}
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        if: ${{ !inputs.dry_run }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Use latest npm
+        if: ${{ !inputs.dry_run }}
+        run: npm install -g npm@latest
+
+      - name: Publish to npm (OIDC trusted publishing)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          cd npm
+          npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version
+          npm publish --provenance --access public
+
+      - name: Release summary
+        if: ${{ !inputs.dry_run }}
+        run: |
+          {
+            echo "## Cut Release complete"
+            echo ""
+            echo "- version: \`${{ steps.meta.outputs.version }}\`"
+            echo "- tag: \`${{ steps.meta.outputs.tag }}\`"
+            echo "- release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }}"
+            echo "- npm: \`@xdevplatform/xurl@${{ steps.meta.outputs.version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
