@@ -153,8 +153,10 @@ jobs:
 
           git tag -a "$TAG" -m "${TAG}"
 
-          # Push main (if we committed) and the tag. GITHUB_TOKEN tag pushes do
-          # not trigger other workflows, so publish runs in the steps below.
+          # Push main (if we committed) and the tag. This job owns publishing:
+          # GoReleaser runs below and npm is dispatched to the Release workflow.
+          # The Release workflow has no tag-push trigger, so this tag push does
+          # not spawn a second, racing GoReleaser run.
           if ! git push origin HEAD:main "refs/tags/${TAG}"; then
             {
               echo "## Cut Release: push rejected"

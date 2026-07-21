@@ -1,13 +1,19 @@
 name: Release
 
+# npm publisher for the xurl launcher. This workflow only publishes to npm via
+# OIDC trusted publishing (npmjs.com binds the trusted publisher to this file).
+# Binaries, the GitHub release, and the Homebrew cask are produced by GoReleaser
+# inside the "Cut Release" workflow, which dispatches this one for the npm step.
+#
+# It is workflow_dispatch only. It deliberately does NOT trigger on tag pushes:
+# "Cut Release" pushes the tag (with a PAT) and runs GoReleaser itself, so a
+# tag-push trigger here would race that GoReleaser and fail uploading duplicate
+# release assets.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish to npm (e.g. 1.2.0, no leading v). Use this to (re)publish npm without re-running GoReleaser."
+        description: "Version to publish to npm (e.g. 1.2.0, no leading v)."
         required: true
         type: string
 
@@ -15,47 +21,11 @@ permissions:
   contents: read
 
 jobs:
-  goreleaser:
-    # Build binaries, create the GitHub release, and update the Homebrew cask.
-    # Runs only on a tag push; npm publishing is a separate job so an npm-side
-    # failure never blocks the GitHub release / Homebrew cask, and so npm can be
-    # (re)published independently via workflow_dispatch.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
-      - name: Run tests
-        run: go test ./...
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-
   publish-npm:
-    # Publishes the npm launcher. Runs after a successful GoReleaser on a tag
-    # push, and can also be triggered manually (workflow_dispatch) to publish or
-    # re-publish a specific version without re-running GoReleaser.
-    needs: [goreleaser]
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.goreleaser.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # enables npm provenance, and OIDC trusted publishing if configured
+      id-token: write # enables npm provenance and OIDC trusted publishing
     steps:
       - uses: actions/checkout@v4
 
@@ -75,13 +45,9 @@ jobs:
 
       - name: Resolve version
         id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME}"
-          fi
-          echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm (OIDC trusted publishing)
         run: |
