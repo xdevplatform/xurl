@@ -953,7 +953,7 @@ func (s *chatSession) readConversation(conversationID string, maxResults int, as
 			fmt.Println("No messages.")
 		}
 		for _, e := range messages {
-			s.printEvent(e, false)
+			s.printEvent(e, s.opts.Verbose)
 		}
 	}
 
