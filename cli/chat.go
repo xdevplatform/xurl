@@ -301,16 +301,18 @@ func chatReadCmd(a *auth.Auth) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			maxResults, _ := cmd.Flags().GetInt("max-results")
 			asJSON, _ := cmd.Flags().GetBool("json")
+			noMarkRead, _ := cmd.Flags().GetBool("no-mark-read")
 			s, err := newChatSession(a, cmd, true)
 			exitOnError(err)
 			defer s.Close()
 			convID, err := s.resolveConversation(args[0])
 			exitOnError(err)
-			exitOnError(s.readConversation(convID, maxResults, asJSON))
+			exitOnError(s.readConversation(convID, maxResults, asJSON, !noMarkRead))
 		},
 	}
 	cmd.Flags().IntP("max-results", "n", 50, "Maximum number of events to fetch (1-100)")
 	cmd.Flags().Bool("json", false, "Output decrypted events as JSON")
+	cmd.Flags().Bool("no-mark-read", false, "Do not mark the conversation read")
 	addCommonFlags(cmd)
 	return cmd
 }
@@ -326,7 +328,8 @@ participants automatically.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			file, _ := cmd.Flags().GetString("file")
 			replyTo, _ := cmd.Flags().GetString("reply-to")
-			markRead, _ := cmd.Flags().GetBool("mark-read")
+			noMarkRead, _ := cmd.Flags().GetBool("no-mark-read")
+			noTyping, _ := cmd.Flags().GetBool("no-typing")
 			text := ""
 			if len(args) == 2 {
 				text = args[1]
@@ -339,12 +342,13 @@ participants automatically.`,
 			defer s.Close()
 			convID, err := s.resolveConversation(args[0])
 			exitOnError(err)
-			exitOnError(s.sendMessage(convID, text, sendOptions{filePath: file, replyToID: replyTo, markRead: markRead}))
+			exitOnError(s.sendMessage(convID, text, sendOptions{filePath: file, replyToID: replyTo, markRead: !noMarkRead, typing: !noTyping}))
 		},
 	}
 	cmd.Flags().StringP("file", "F", "", "Attach an encrypted media file")
 	cmd.Flags().String("reply-to", "", "Sequence id of the event to reply to")
-	cmd.Flags().Bool("mark-read", false, "Mark the conversation read after sending")
+	cmd.Flags().Bool("no-mark-read", false, "Do not mark the conversation read after sending")
+	cmd.Flags().Bool("no-typing", false, "Do not send a typing indicator before sending")
 	addCommonFlags(cmd)
 	return cmd
 }
@@ -356,15 +360,17 @@ func chatListenCmd(a *auth.Auth) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			interval, _ := cmd.Flags().GetInt("interval")
+			noMarkRead, _ := cmd.Flags().GetBool("no-mark-read")
 			s, err := newChatSession(a, cmd, true)
 			exitOnError(err)
 			defer s.Close()
 			convID, err := s.resolveConversation(args[0])
 			exitOnError(err)
-			exitOnError(s.listen(convID, time.Duration(interval)*time.Second))
+			exitOnError(s.listen(convID, time.Duration(interval)*time.Second, !noMarkRead))
 		},
 	}
 	cmd.Flags().Int("interval", 3, "Polling interval in seconds")
+	cmd.Flags().Bool("no-mark-read", false, "Do not mark new messages read as they arrive")
 	addCommonFlags(cmd)
 	return cmd
 }
@@ -1063,10 +1069,16 @@ func (s *chatSession) adoptKeyEvents(keyEvents []string) {
 	}
 }
 
-func (s *chatSession) readConversation(conversationID string, maxResults int, asJSON bool) error {
+func (s *chatSession) readConversation(conversationID string, maxResults int, asJSON, markRead bool) error {
 	result, events, _, err := s.loadBacklog(conversationID, maxResults, "")
 	if err != nil {
 		return err
+	}
+	// Reading a conversation means you have seen it: mark it read up to the
+	// newest event (a watermark — this also marks every earlier message
+	// read). Best-effort; opt out with --no-mark-read.
+	if markRead {
+		s.markReadLatest(conversationID, events)
 	}
 
 	// Print oldest-first for reading, ordering by event timestamp.
@@ -1112,7 +1124,7 @@ func (s *chatSession) readConversation(conversationID string, maxResults int, as
 	return nil
 }
 
-func (s *chatSession) listen(conversationID string, interval time.Duration) error {
+func (s *chatSession) listen(conversationID string, interval time.Duration, markRead bool) error {
 	if interval <= 0 {
 		interval = 3 * time.Second
 	}
@@ -1128,6 +1140,10 @@ func (s *chatSession) listen(conversationID string, interval time.Duration) erro
 	seen := map[string]bool{}
 	for _, e := range backlog {
 		seen[e.ID] = true
+	}
+	// Opening the conversation marks the existing backlog read.
+	if markRead {
+		s.markReadLatest(conversationID, backlog)
 	}
 
 	fmt.Printf("Listening on %s (polling every %s, Ctrl-C to stop)...\n", conversationID, interval)
@@ -1195,6 +1211,11 @@ func (s *chatSession) listen(conversationID string, interval time.Duration) erro
 				}
 			}
 			s.printEvent(event, s.opts.Verbose)
+		}
+		// New arrivals shown means they have been seen: advance the read
+		// watermark to the newest of this batch.
+		if markRead && len(fresh) > 0 {
+			s.markReadLatest(conversationID, fresh)
 		}
 	}
 }
@@ -1314,9 +1335,18 @@ type sendOptions struct {
 	filePath  string // attach an encrypted media file
 	replyToID string // reply to the event with this sequence id
 	markRead  bool   // mark the conversation read after sending
+	typing    bool   // send a typing indicator before sending
 }
 
 func (s *chatSession) sendMessage(conversationID, text string, sopts sendOptions) error {
+	// A typing indicator before the message mirrors how a person composes;
+	// best-effort so it never blocks the send. Opt out with --no-typing.
+	if sopts.typing {
+		if _, err := api.SendChatTyping(s.client, conversationID, s.opts); err != nil && s.opts.Verbose {
+			fmt.Fprintf(os.Stderr, "warning: could not send typing indicator: %v\n", err)
+		}
+	}
+
 	// Load the backlog: it extracts the conversation key and tells us whether
 	// the conversation exists.
 	result, events, _, err := s.loadBacklog(conversationID, 100, "")

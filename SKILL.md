@@ -108,8 +108,8 @@ Tokens are persisted to `~/.xurl/auth.yml` in YAML format (a legacy single-file 
 | Reply to a message | `xurl chat send CONV "text" --reply-to SEQUENCE_ID` |
 | Download an attachment | `xurl chat download CONV MEDIA_HASH_KEY -o out.png` |
 | Add group members | `xurl chat add-members GROUP @user --yes` (write op) |
-| Mark read | `xurl chat mark-read CONV` |
-| Typing indicator | `xurl chat typing CONV` |
+| Mark read (explicit) | `xurl chat mark-read CONV` |
+| Typing indicator (explicit) | `xurl chat typing CONV` |
 | **App Management** | |
 | Register app | Manual, outside agent (do not pass secrets via agent) |
 | List apps | `xurl auth apps list` |
@@ -294,6 +294,7 @@ xurl chat rotate @someuser --yes      # skip the prompt (required non-TTY)
 Notes for agents:
 - Messages whose authorship signature cannot be verified are rejected by default and surface as stderr decrypt warnings; unsigned messages that still render carry a red `[unverified]` marker — treat those with suspicion.
 - Messages with attachments render a `📎 attachment <media_hash_key>` marker; pass that hash key to `xurl chat download CONV <media_hash_key>` to fetch and decrypt the file. Replies show a `↩` prefix.
+- **`read` and `listen` mark the conversation read automatically** (a read receipt visible to other participants); `send` also marks read and sends a typing indicator first. These are writes — pass `--no-mark-read` / `--no-typing` to suppress them (e.g. to read without signaling). The standalone `mark-read` and `typing` commands remain for scripted/explicit use.
 - Decrypt warnings for individual events go to stderr and are non-fatal; the rest of the conversation still renders.
 - If a command reports missing keys, do not attempt to generate or register any — tell the user to run `xurl chat keys restore` (or `import`) themselves.
 - `chat rotate` is a write visible to every participant's clients; never run it without explicit user intent, and prefer letting the user confirm the prompt over passing `--yes`.

@@ -414,9 +414,13 @@ xurl chat send @bob "look" --file photo.png   # encrypt + upload an attachment
 xurl chat send @bob "agreed" --reply-to 1234  # reply to an event (sequence id from --json)
 xurl chat download @bob MEDIA_HASH_KEY -o out.png  # download + decrypt an attachment
 xurl chat add-members g123 @carol             # add a member (rotates the group key)
-xurl chat mark-read @bob                       # mark read up to the latest message
-xurl chat typing @bob                          # send a typing indicator
+xurl chat mark-read @bob                       # explicit mark-read (also automatic on read/listen/send)
+xurl chat typing @bob                          # explicit typing indicator (also automatic before send)
 ```
+
+`read`, `listen`, and `send` mark the conversation read automatically (marking the
+newest message read clears everything before it), and `send` sends a typing indicator
+first. Suppress these writes with `--no-mark-read` / `--no-typing`.
 
 Sending to someone new establishes the conversation automatically: xurl generates a
 conversation key, encrypts it to both participants' newest registered keys, and sends.
