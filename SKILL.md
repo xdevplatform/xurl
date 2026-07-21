@@ -103,6 +103,7 @@ Tokens are persisted to `~/.xurl/auth.yml` in YAML format (a legacy single-file 
 | Read a conversation | `xurl chat read @handle -n 50` |
 | Send encrypted message | `xurl chat send @handle "message"` |
 | Listen for new messages | `xurl chat listen @handle` |
+| Rotate a conversation key | `xurl chat rotate CONV --yes` (write op — see notes) |
 | **App Management** | |
 | Register app | Manual, outside agent (do not pass secrets via agent) |
 | List apps | `xurl auth apps list` |
@@ -275,6 +276,13 @@ xurl chat send 123-456 "hello again"
 # Print new messages as they arrive (poll loop; Ctrl-C to stop)
 xurl chat listen @someuser
 xurl chat listen g1234567890 --interval 5
+
+# Rotate a conversation's encryption key (visible to other participants).
+# Use when a key may be exposed, or to grant a member access going forward
+# when their keys were registered after the last rotation. Future messages
+# only: old history stays readable only to holders of the old versions.
+xurl chat rotate g1234567890          # prompts for confirmation
+xurl chat rotate @someuser --yes      # skip the prompt (required non-TTY)
 ```
 
 Notes for agents:
@@ -282,6 +290,7 @@ Notes for agents:
 - Messages with attachments render a `📎 attachment` line (or a `📎` suffix after text, with `×N` for multiples); downloading encrypted media is not supported yet.
 - Decrypt warnings for individual events go to stderr and are non-fatal; the rest of the conversation still renders.
 - If a command reports missing keys, do not attempt to generate or register any — tell the user to run `xurl chat keys restore` (or `import`) themselves.
+- `chat rotate` is a write visible to every participant's clients; never run it without explicit user intent, and prefer letting the user confirm the prompt over passing `--yes`.
 
 ```bash
 # Upload a file (auto‑detects type for images/videos)

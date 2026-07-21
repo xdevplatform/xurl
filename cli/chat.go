@@ -60,8 +60,37 @@ dm.read and dm.write scopes (run 'xurl auth oauth2' first).`,
 		chatReadCmd(a),
 		chatSendCmd(a),
 		chatListenCmd(a),
+		chatRotateCmd(a),
 	)
 	return chatCmd
+}
+
+func chatRotateCmd(a *auth.Auth) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rotate CONVERSATION|@USERNAME",
+		Short: "Rotate a conversation's encryption key",
+		Long: `Generates a fresh conversation key and distributes it to every current
+participant's newest registered keys.
+
+Rotate when a conversation key may have been exposed, or to grant a member
+access going forward when their keys were registered after the last rotation
+(they gain access to new messages only). Rotation protects future messages:
+anyone holding an earlier key version can still read the messages encrypted
+under it, and members without the old versions still cannot read old history.`,
+		Args: cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			yes, _ := cmd.Flags().GetBool("yes")
+			s, err := newChatSession(a, cmd, true)
+			exitOnError(err)
+			defer s.Close()
+			convID, err := s.resolveConversation(args[0])
+			exitOnError(err)
+			exitOnError(s.rotateConversationKey(convID, yes))
+		},
+	}
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	addCommonFlags(cmd)
+	return cmd
 }
 
 // -----------------------------------------------------------------
@@ -1236,11 +1265,11 @@ func (s *chatSession) sendMessage(conversationID, text string) error {
 		}
 		// Fresh (or confirmed key-less) 1:1 conversation: generate and
 		// distribute a conversation key to every participant.
-		prepared, err := s.prepareOneToOneKey(conversationID)
+		prepared, confirmedID, err := s.prepareOneToOneKey(conversationID)
 		if err != nil {
 			return err
 		}
-		signConvID = prepared.ConversationID
+		signConvID = api.ChatConversationEventID(confirmedID)
 		params.ConversationID = signConvID
 		params.ConversationKey = prepared.ConversationKey
 		params.ConversationKeyVersion = prepared.ConversationKeyVersion
@@ -1269,14 +1298,105 @@ func (s *chatSession) sendMessage(conversationID, text string) error {
 
 // prepareOneToOneKey generates a conversation key for a 1:1 conversation,
 // ECIES-encrypts it to both participants, and registers it with the API.
-func (s *chatSession) prepareOneToOneKey(conversationID string) (*chatxdk.PreparedConversationChange, error) {
+func (s *chatSession) prepareOneToOneKey(conversationID string) (*chatxdk.PreparedConversationChange, string, error) {
 	parts := strings.Split(conversationID, "-")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("cannot initialize keys for conversation %s", conversationID)
+		return nil, "", fmt.Errorf("cannot initialize keys for conversation %s", conversationID)
+	}
+	// An empty conversation id has the SDK derive the canonical 1:1 id from
+	// the participants.
+	return s.establishConversationKey(parts, "")
+}
+
+// establishConversationKey generates a conversation key, encrypts it to each
+// participant's newest registered identity key, and POSTs it to the API. An
+// empty conversationID creates a fresh 1:1 key; a set id rotates the existing
+// conversation's key. It returns the prepared change and the canonical
+// conversation id confirmed by the server (which callers must prefer over a
+// client-reconstructed id).
+func (s *chatSession) establishConversationKey(participantIDs []string, conversationID string) (*chatxdk.PreparedConversationChange, string, error) {
+	inputs, err := s.latestKeyInputs(participantIDs)
+	if err != nil {
+		return nil, "", err
 	}
 
+	prepared, err := s.chat.PrepareConversationKeyChange(chatxdk.ConversationKeyChangeParams{
+		PublicKeys:     inputs,
+		ConversationID: conversationID,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to prepare conversation key: %w", err)
+	}
+
+	pub, err := s.chat.GetPublicKeys()
+	if err != nil {
+		return nil, "", err
+	}
+	body := preparedChangeToRequest(prepared, pub.Signing)
+	resp, err := api.AddChatConversationKeys(s.client, prepared.ConversationID, body, s.opts)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to register conversation key: %w", err)
+	}
+
+	confirmedID := prepared.ConversationID
+	var out struct {
+		Data struct {
+			ConversationID string `json:"conversation_id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(resp, &out) == nil && out.Data.ConversationID != "" {
+		confirmedID = out.Data.ConversationID
+	}
+	return prepared, confirmedID, nil
+}
+
+// rotateConversationKey generates a fresh conversation key for an existing
+// conversation and wraps it to every current participant's newest keys.
+func (s *chatSession) rotateConversationKey(conversationID string, skipConfirm bool) error {
+	// The roster comes from the conversation itself: metadata participants
+	// for a group, the two ids from the canonical id for a 1:1.
+	var roster []string
+	if strings.HasPrefix(conversationID, "g") {
+		ids, _, err := api.GetChatConversation(s.client, conversationID, s.opts)
+		if err != nil {
+			return fmt.Errorf("could not fetch the group roster: %w", err)
+		}
+		roster = ids
+	} else {
+		roster = strings.Split(conversationID, "-")
+	}
+	if len(roster) < 2 {
+		return fmt.Errorf("conversation %s has no roster to rotate a key for", conversationID)
+	}
+
+	if !skipConfirm {
+		fmt.Fprintf(os.Stderr, "Rotating the key of %s re-encrypts future messages to %d participant(s)' newest keys.\n", conversationID, len(roster))
+		fmt.Fprintln(os.Stderr, "Other participants' clients will see a key change. Old messages stay readable only to holders of the old key versions.")
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return fmt.Errorf("refusing to rotate non-interactively — pass --yes to confirm")
+		}
+		fmt.Fprint(os.Stderr, "Rotate? [y/N] ")
+		var answer string
+		_, _ = fmt.Scanln(&answer)
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			return fmt.Errorf("rotation aborted")
+		}
+	}
+
+	prepared, confirmedID, err := s.establishConversationKey(roster, api.ChatConversationEventID(conversationID))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s %s\n", color.GreenString("✓ rotated key of"), api.ChatConversationPathID(confirmedID))
+	color.New(color.Faint).Printf("  new key version %s, wrapped to %d participant(s)\n", prepared.ConversationKeyVersion, len(prepared.ParticipantKeys))
+	return nil
+}
+
+// latestKeyInputs fetches each participant's registered public keys and
+// selects the newest version to encrypt the conversation key to.
+func (s *chatSession) latestKeyInputs(userIDs []string) ([]chatxdk.PublicKeyInput, error) {
 	var inputs []chatxdk.PublicKeyInput
-	for _, uid := range parts {
+	for _, uid := range userIDs {
 		pks, err := api.GetChatPublicKeys(s.client, uid, s.opts)
 		if err != nil {
 			return nil, err
@@ -1288,7 +1408,6 @@ func (s *chatSession) prepareOneToOneKey(conversationID string) (*chatxdk.Prepar
 			}
 			return nil, fmt.Errorf("%s has no registered XChat keys — they need to enable encrypted chat first", who)
 		}
-		// Encrypt to the newest key version of each participant.
 		latest := pks[0]
 		for _, pk := range pks[1:] {
 			if api.CompareChatKeyVersions(pk.Version, latest.Version) > 0 {
@@ -1301,25 +1420,7 @@ func (s *chatSession) prepareOneToOneKey(conversationID string) (*chatxdk.Prepar
 			KeyVersion: latest.Version,
 		})
 	}
-
-	// An empty conversation id derives the canonical 1:1 id from the
-	// participants.
-	prepared, err := s.chat.PrepareConversationKeyChange(chatxdk.ConversationKeyChangeParams{
-		PublicKeys: inputs,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare conversation key: %w", err)
-	}
-
-	pub, err := s.chat.GetPublicKeys()
-	if err != nil {
-		return nil, err
-	}
-	body := preparedChangeToRequest(prepared, pub.Signing)
-	if _, err := api.AddChatConversationKeys(s.client, prepared.ConversationID, body, s.opts); err != nil {
-		return nil, fmt.Errorf("failed to register conversation key: %w", err)
-	}
-	return prepared, nil
+	return inputs, nil
 }
 
 // preparedChangeToRequest maps a prepared conversation change into the

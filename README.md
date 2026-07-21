@@ -407,7 +407,14 @@ xurl chat read @bob
 xurl chat read @bob --json          # decrypted events as JSON
 xurl chat conversations             # list your inbox
 xurl chat listen @bob               # print new messages as they arrive (Ctrl-C to stop)
+xurl chat rotate @bob               # rotate the conversation key (future messages only)
 ```
+
+Sending to someone new establishes the conversation automatically: xurl generates a
+conversation key, encrypts it to both participants' newest registered keys, and sends.
+`rotate` runs the same key change on an existing conversation — use it if a key may be
+exposed, or to give a participant whose keys are newer than the last rotation access to
+messages from now on (old history stays unreadable to them by design).
 
 Key management:
 ```bash

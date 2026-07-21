@@ -6,7 +6,7 @@ All user-visible bugs and enhancements should be recorded here.
 
 ### Added
 
-- `xurl chat` — an end-to-end encrypted XChat client: `keys status|restore|import` (keys must already be registered by another XChat client; xurl never generates or registers keys), `conversations`, `read`, `send`, and `listen`. Encryption and decryption happen locally via the chat-xdk library; private keys live in `~/.xurl/keys.yml` (mode 600). Requires a cgo build on macOS (amd64/arm64) or Linux (amd64) — prebuilt release binaries ship a stub explaining how to build with chat enabled.
+- `xurl chat` — an end-to-end encrypted XChat client: `keys status|restore|import`, `rotate`, (keys must already be registered by another XChat client; xurl never generates or registers keys), `conversations`, `read`, `send`, and `listen`. Encryption and decryption happen locally via the chat-xdk library; private keys live in `~/.xurl/keys.yml` (mode 600). Requires a cgo build on macOS (amd64/arm64) or Linux (amd64) — prebuilt release binaries ship a stub explaining how to build with chat enabled.
 
 ### Changed
 
