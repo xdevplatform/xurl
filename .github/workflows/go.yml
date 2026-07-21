@@ -24,5 +24,46 @@ jobs:
     - name: Run tests
       run: go test -v ./...
 
+    # The chat stub (cli/chat_unsupported.go) must keep compiling for the
+    # platforms that ship without the chat client.
+    - name: Build chat-stub targets
+      run: |
+        GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
+        GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...
+
     - name: Run lint
       run: gofmt -l .
+
+  # Compile every release target exactly as the Cut Release workflow does
+  # (macOS runner, cgo darwin builds, zig-cross-compiled static linux/amd64,
+  # CGO_ENABLED=0 stubs) so a broken release build is caught before a cut.
+  release-build:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Set up Zig
+      uses: mlugg/setup-zig@v2
+      with:
+        version: "0.16.0"
+
+    - name: GoReleaser build (snapshot)
+      uses: goreleaser/goreleaser-action@v6
+      with:
+        version: "~> v2"
+        args: build --snapshot --clean
+
+    - name: Smoke-test the darwin binary
+      run: |
+        BIN=$(ls dist/darwin-cgo_darwin_arm64*/xurl)
+        "$BIN" version
+        # The real chat client's help must load, not the stub message.
+        if "$BIN" chat 2>&1 | grep -q "not available in this build"; then
+          echo "::error::darwin/arm64 release binary shipped the chat stub"
+          exit 1
+        fi

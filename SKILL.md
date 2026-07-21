@@ -254,7 +254,7 @@ xurl dms -n 25
 
 ### Encrypted Chat (XChat)
 
-`xurl chat` is an end-to-end encrypted XChat client: encryption and decryption happen locally via the chat-xdk crypto library, so the server only sees ciphertext. Requires OAuth2 user auth with `dm.read` + `dm.write` scopes, and is available on macOS (Intel/Apple Silicon) and Linux amd64 when built with cgo (prebuilt release binaries ship a stub that says so).
+`xurl chat` is an end-to-end encrypted XChat client: encryption and decryption happen locally via the chat-xdk crypto library, so the server only sees ciphertext. Requires OAuth2 user auth with `dm.read` + `dm.write` scopes, and is available on macOS (Intel/Apple Silicon) and Linux amd64 — release binaries include it there; elsewhere (Windows, Linux arm64/i386) `xurl chat` prints a stub that says so.
 
 **Keys come from another XChat client** — xurl never generates or registers encryption keys. The account must already have keys (e.g. from the X app); bring them to this machine once with `restore` (Juicebox PIN recovery) or `import` (an exported key blob). Private keys are stored in `~/.xurl/keys.yml` (mode 600) — never read that file into LLM context.
 
