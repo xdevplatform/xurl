@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Changed
+
+- Release binaries now include the full `xurl chat` XChat client on macOS (arm64/amd64) and Linux (amd64) — installing via Homebrew, npm, or a GitHub release tarball no longer prints the "not available in this build" stub on those platforms. The Linux amd64 binary is statically linked against musl, so it runs on both glibc and musl (e.g. Alpine) distros. Platforms without a chat-xdk library (Windows, Linux arm64/i386) still ship the graceful stub.
+
 ## v1.3.0 - 2026-07-21
 
 ### Added

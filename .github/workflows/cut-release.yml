@@ -7,6 +7,11 @@
 #   4. Commit CHANGELOG on main, create annotated tag, push both
 #   5. Publish via GoReleaser (GitHub release + Homebrew) and npm
 #
+# The job runs on a macOS arm64 runner so GoReleaser can produce cgo builds
+# of `xurl chat` for every platform chat-xdk supports: darwin targets build
+# natively with Apple clang, and linux/amd64 cross-compiles with `zig cc`
+# against chat-xdk's musl static library (see .goreleaser.yaml).
+#
 # No pull request is opened. GITHUB_TOKEN cannot create PRs unless the repo
 # setting "Allow GitHub Actions to create and approve pull requests" is on,
 # and the PR path is unnecessary for a release cut.
@@ -70,7 +75,9 @@ permissions:
 jobs:
   cut:
     name: Cut ${{ inputs.version || inputs.bump }}
-    runs-on: ubuntu-latest
+    # macOS arm64: darwin cgo builds need Apple clang, and zig cross-compiles
+    # the linux/amd64 cgo build. Stub platforms cross-compile from anywhere.
+    runs-on: macos-latest
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -85,6 +92,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+
+      # zig is the C cross-compiler for the linux/amd64 cgo build.
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
 
       - name: Resolve version and promote changelog
         id: meta

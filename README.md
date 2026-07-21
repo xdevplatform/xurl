@@ -425,8 +425,10 @@ Notes:
   writes to Juicebox or the key-registration endpoint.
 - Private keys live in `~/.xurl/keys.yml` (mode 600). Losing it is safe as long as the
   Juicebox backup (made by the original client) still exists.
-- `chat` requires a cgo build on macOS (Intel/Apple Silicon) or Linux (amd64). Prebuilt
-  release binaries ship a stub; build from source to enable it:
+- `chat` is supported on macOS (Intel/Apple Silicon) and Linux (amd64), and the release
+  binaries (Homebrew, npm, GitHub releases) include it on those platforms. On other
+  platforms (Windows, Linux arm64/i386) `xurl chat` prints a stub explaining it is
+  unavailable. Source builds on supported platforms need cgo:
   `CGO_ENABLED=1 go install github.com/xdevplatform/xurl@latest`.
 
 ## Token Storage

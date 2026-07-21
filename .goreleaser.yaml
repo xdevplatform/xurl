@@ -1,8 +1,4 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
-
-# The lines below are called `modelines`. See `:help modeline`
-# Feel free to remove those if you don't want/need to use them.
+# GoReleaser config. Docs: https://goreleaser.com
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 
@@ -10,23 +6,71 @@ version: 2
 
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod tidy
-    # you may remove this if you don't need go generate
     - go generate ./...
 
+# The release runs on a macOS arm64 runner (see cut-release.yml) so the
+# `xurl chat` XChat client — which requires cgo to link the chat-xdk static
+# libraries — can be compiled into every platform chat-xdk supports:
+#
+#   darwin/arm64   native cgo build
+#   darwin/amd64   cgo cross-build with Apple clang (-arch x86_64)
+#   linux/amd64    cgo cross-build with `zig cc` against chat-xdk's musl
+#                  static lib, fully statically linked so the one binary
+#                  runs on both glibc and musl distros
+#
+# Platforms chat-xdk has no library for (windows/*, linux/arm64, linux/386)
+# are built with CGO_ENABLED=0 and ship the graceful `xurl chat` stub.
 builds:
-  # Release binaries are built with CGO disabled so a single Linux runner can
-  # cross-compile every platform. The `xurl chat` XChat client requires cgo
-  # (the chat-xdk crypto binding links prebuilt static libraries), so release
-  # binaries ship a stub for it; chat needs a source build with CGO_ENABLED=1
-  # on macOS (amd64/arm64) or Linux (amd64). See README "Encrypted chat".
-  - env:
+  - id: darwin-cgo
+    targets:
+      - darwin_arm64
+      - darwin_amd64
+    env:
+      - CGO_ENABLED=1
+    ldflags:
+      - -s -w
+      - -X github.com/xdevplatform/xurl/version.Version={{.Version}}
+      - -X github.com/xdevplatform/xurl/version.Commit={{.Commit}}
+      - -X github.com/xdevplatform/xurl/version.BuildDate={{.Date}}
+    hooks:
+      post:
+        # Ad-hoc sign so both darwin binaries carry a valid signature. The
+        # native arm64 build is already linker-signed, but the cross-built
+        # amd64 binary comes out unsigned. No Apple credentials involved;
+        # Gatekeeper quarantine is handled per install channel (the Homebrew
+        # cask strips it, and npm's programmatic download never sets it).
+        - cmd: codesign -s - --force {{ .Path }}
+
+  - id: linux-cgo
+    targets:
+      - linux_amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=zig cc -target x86_64-linux-musl
+    # The musl tag selects chat-xdk's linux_amd64_musl static library.
+    flags:
+      - -tags=musl
+    ldflags:
+      - -s -w
+      - -X github.com/xdevplatform/xurl/version.Version={{.Version}}
+      - -X github.com/xdevplatform/xurl/version.Commit={{.Commit}}
+      - -X github.com/xdevplatform/xurl/version.BuildDate={{.Date}}
+      - -linkmode external
+      # Static link against musl so the binary has no runtime libc
+      # dependency; -lunwind provides the unwinder symbols the Rust-built
+      # chat-xdk library needs (zig bundles LLVM's libunwind).
+      - -extldflags "-static -lunwind"
+
+  - id: stub
+    targets:
+      - linux_arm64
+      - linux_386
+      - windows_amd64
+      - windows_arm64
+      - windows_386
+    env:
       - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
     ldflags:
       - -s -w
       - -X github.com/xdevplatform/xurl/version.Version={{.Version}}
