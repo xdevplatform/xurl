@@ -4,6 +4,14 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Added
+
+- `xurl chat` — an end-to-end encrypted XChat client: `keys status|restore|import` (keys must already be registered by another XChat client; xurl never generates or registers keys), `conversations`, `read`, `send`, and `listen`. Encryption and decryption happen locally via the chat-xdk library; private keys live in `~/.xurl/keys.yml` (mode 600). Requires a cgo build on macOS (amd64/arm64) or Linux (amd64) — prebuilt release binaries ship a stub explaining how to build with chat enabled.
+
+### Changed
+
+- `~/.xurl` is now a directory: tokens and app credentials live in `~/.xurl/auth.yml`, and XChat private keys live in `~/.xurl/keys.yml`. An existing single-file `~/.xurl` migrates automatically (rename-based and non-destructive) on first use, and the existing legacy migrations still apply on top of the new layout: pre-v1.0 JSON-format token files are converted to YAML, and `.twurlrc` import is unchanged. Older xurl binaries cannot read the new layout.
+
 ## v1.2.3 - 2026-07-16
 
 ### Added

@@ -69,6 +69,8 @@ type storeFile struct {
 
 // ─── Legacy JSON structure (for migration) ──────────────────────────
 
+// legacyStore is the pre-v1.0 single-app JSON layout of the token file;
+// loadFromData converts it to the YAML multi-app format on first load.
 type legacyStore struct {
 	OAuth2Tokens map[string]Token `json:"oauth2_tokens"`
 	OAuth1Token  *Token           `json:"oauth1_tokens,omitempty"`
@@ -98,17 +100,19 @@ func resolveHomeDir() string {
 	return homeDir
 }
 
-// Creates a new TokenStore, loading from ~/.xurl (auto-migrating legacy JSON).
+// Creates a new TokenStore, loading from ~/.xurl/auth.yml (migrating a
+// legacy single-file ~/.xurl on first use).
 func NewTokenStore() *TokenStore {
 	return NewTokenStoreWithCredentials("", "")
 }
 
 // NewTokenStoreWithCredentials creates a TokenStore and backfills the given
-// client credentials into any app that was migrated without them (i.e. legacy
-// JSON migration where CLIENT_ID / CLIENT_SECRET came from env vars).
+// client credentials into any app that has tokens but no stored client
+// ID/secret (e.g. apps authenticated with CLIENT_ID / CLIENT_SECRET coming
+// from env vars), so later refreshes work without the env vars present.
 func NewTokenStoreWithCredentials(clientID, clientSecret string) *TokenStore {
 	homeDir := resolveHomeDir()
-	filePath := filepath.Join(homeDir, ".xurl")
+	filePath := AuthFilePath()
 
 	store := &TokenStore{
 		Apps:     make(map[string]*App),

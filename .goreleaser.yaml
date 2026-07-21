@@ -16,6 +16,11 @@ before:
     - go generate ./...
 
 builds:
+  # Release binaries are built with CGO disabled so a single Linux runner can
+  # cross-compile every platform. The `xurl chat` XChat client requires cgo
+  # (the chat-xdk crypto binding links prebuilt static libraries), so release
+  # binaries ship a stub for it; chat needs a source build with CGO_ENABLED=1
+  # on macOS (amd64/arm64) or Linux (amd64). See README "Encrypted chat".
   - env:
       - CGO_ENABLED=0
     goos:
