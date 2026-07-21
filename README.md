@@ -9,9 +9,10 @@ A command-line tool for interacting with the X (formerly Twitter) API, supportin
 - OAuth 1.0a authentication
 - Multiple OAuth 2.0 account support per app
 - Default app and default user selection (interactive Bubble Tea picker or single command)
-- Persistent token storage in YAML (`~/.xurl`), auto-migrates from legacy JSON
+- Persistent token storage in YAML (`~/.xurl/auth.yml`), auto-migrates from the legacy single-file layout
 - HTTP request customization (headers, methods, body)
 - Per-request app override with `--app`
+- End-to-end encrypted XChat client (`xurl chat`) built on the official chat-xdk crypto library
 
 ## Installation
 
@@ -45,13 +46,13 @@ You must have a developer account and app to use this tool.
 
 #### Register an app
 
-Register your X API app credentials so they're stored in `~/.xurl` (no env vars needed after this):
+Register your X API app credentials so they're stored in `~/.xurl/auth.yml` (no env vars needed after this):
 
 ```bash
 xurl auth apps add my-app --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET
 ```
 
-If you want the app to keep its own callback configuration in `~/.xurl`, you can store the redirect URI there too:
+If you want the app to keep its own callback configuration in `~/.xurl/auth.yml`, you can store the redirect URI there too:
 
 ```bash
 xurl auth apps add my-app --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --redirect-uri http://localhost:8080/callback
@@ -65,7 +66,7 @@ xurl auth apps add dev-app  --client-id DEV_ID  --client-secret DEV_SECRET
 
 > **Legacy / env-var flow:** You can also set `CLIENT_ID` and `CLIENT_SECRET` as environment variables. They'll be auto-saved into the active app on first use.
 >
-> `REDIRECT_URI` now resolves in this order: `REDIRECT_URI` environment variable, then the app's stored `redirect_uri` in `~/.xurl`, then the built-in default `http://localhost:8080/callback`.
+> `REDIRECT_URI` now resolves in this order: `REDIRECT_URI` environment variable, then the app's stored `redirect_uri` in `~/.xurl/auth.yml`, then the built-in default `http://localhost:8080/callback`.
 
 #### OAuth 2.0 User-Context
 **Note:** For OAuth 2.0 authentication, you must specify the redirect URI in the [X API developer portal](https://developer.x.com/en/portal/dashboard).
@@ -383,9 +384,54 @@ xurl -X POST /2/media/upload/MEDIA_ID/finalize
 xurl '/2/media/upload?command=STATUS&media_id=MEDIA_ID'
 ```
 
+### Encrypted Chat (`xurl chat`)
+
+`xurl chat` is a full end-to-end encrypted [XChat](https://docs.x.com/) client. Encryption and
+decryption happen locally using the official [chat-xdk](https://github.com/xdevplatform/chat-xdk)
+crypto library; the server only ever sees ciphertext.
+
+**Keys must already exist.** xurl never generates or registers encryption keys — the
+account needs XChat keys from another client (e.g. the X app). Bring them to this
+machine once (needs an OAuth2 login with the `dm.read` + `dm.write` scopes):
+```bash
+xurl chat keys restore              # recover from Juicebox with your PIN, or
+xurl chat keys import               # paste a private-key blob exported elsewhere
+xurl chat keys status               # local + registered key state and fingerprint
+```
+
+Conversations are addressed by `@username`, user id, or conversation id (`123-456`, `g123`):
+```bash
+xurl chat conversations                            # list your inbox
+xurl chat read @bob [-n 50] [--json]               # decrypted history (auto marks read)
+xurl chat listen @bob                              # live tail (Ctrl-C to stop)
+xurl chat send @bob "hello"                        # send (new 1:1 keys itself)
+xurl chat send @bob "look" --file photo.png        # attach an encrypted file
+xurl chat send @bob "ok" --reply-to SEQUENCE_ID    # threaded reply (id from read --json)
+xurl chat download @bob MEDIA_HASH_KEY -o out.png  # download + decrypt an attachment
+xurl chat rotate @bob                              # rotate the conversation key
+xurl chat add-members g123 @carol                  # add a group member (rotates the key)
+xurl chat mark-read @bob                           # (also automatic on read/listen/send)
+xurl chat typing @bob                              # (also automatic before send)
+```
+
+`read`, `listen`, and `send` mark the conversation read automatically, and `send` sends a
+typing indicator first; suppress with `--no-mark-read` / `--no-typing`. `rotate` and
+`add-members` change the key for every participant and protect future messages only —
+old history stays readable only to holders of the earlier key versions.
+
+Notes:
+
+- Keys not already registered on the account are rejected on restore/import; xurl never
+  writes to Juicebox or the key-registration endpoint.
+- Private keys live in `~/.xurl/keys.yml` (mode 600). Losing it is safe as long as the
+  Juicebox backup (made by the original client) still exists.
+- `chat` requires a cgo build on macOS (Intel/Apple Silicon) or Linux (amd64). Prebuilt
+  release binaries ship a stub; build from source to enable it:
+  `CGO_ENABLED=1 go install github.com/xdevplatform/xurl@latest`.
+
 ## Token Storage
 
-Tokens and app credentials are stored in `~/.xurl` in YAML format. Each registered app has its own isolated set of tokens. Example:
+`~/.xurl` is a directory: tokens and app credentials live in `~/.xurl/auth.yml`, and XChat private keys live in `~/.xurl/keys.yml`. Each registered app has its own isolated set of tokens. Example `auth.yml`:
 
 ```yaml
 apps:
@@ -407,7 +453,7 @@ apps:
 default_app: my-app
 ```
 
-> **Migration:** If you have an existing JSON-format `~/.xurl` file from a previous version, it will be automatically migrated to the new YAML multi-app format on first use. Your tokens are preserved in a `default` app.
+> **Migration:** A single-file `~/.xurl` from a previous version migrates automatically to `~/.xurl/auth.yml` on first use (pre-v1.0 JSON-format files are also converted to the YAML multi-app format, preserving tokens in a `default` app).
 
 ## Contributing
 Contributions are welcome!

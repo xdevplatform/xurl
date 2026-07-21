@@ -428,3 +428,31 @@ func TestStreamRequest(t *testing.T) {
 		assert.True(t, xurlErrors.IsAPIError(err), "Expected API error")
 	})
 }
+
+// TestExplicitUsernameDoesNotDowngradeToAppOnly ensures that when a specific
+// OAuth2 user is requested but that user's token cannot be produced (e.g. a
+// failed refresh), the client surfaces the auth error instead of silently
+// falling back to the app-only bearer token and acting as the wrong principal.
+func TestExplicitUsernameDoesNotDowngradeToAppOnly(t *testing.T) {
+	cfg := &config.Config{
+		ClientID:     "cid",
+		ClientSecret: "secret",
+		TokenURL:     "https://api.x.com/2/oauth2/token",
+		APIBaseURL:   "https://api.x.com",
+	}
+	mockAuth := auth.NewAuth(cfg)
+	ts, tempDir := createTempTokenStore(t)
+	defer os.RemoveAll(tempDir)
+
+	// An app-only bearer exists (the tempting downgrade target) plus an
+	// OAuth2 token for a user whose access token is already expired with a
+	// bogus refresh token, so any refresh attempt fails.
+	require.NoError(t, ts.SaveBearerToken("app-only-bearer"))
+	require.NoError(t, ts.SaveOAuth2Token("alice", "expired-access", "bad-refresh", 1))
+	mockAuth.WithTokenStore(ts)
+
+	client := NewApiClient(cfg, mockAuth)
+	_, err := client.getAuthHeader("GET", "https://api.x.com/2/users/me", "", "alice")
+	require.Error(t, err, "explicit user with a failed token must not downgrade to app-only")
+	assert.False(t, xurlErrors.IsAPIError(err) && err.Error() == "", "should surface the refresh error")
+}

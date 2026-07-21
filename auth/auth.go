@@ -175,6 +175,14 @@ func (a *Auth) GetOAuth2Header(username string) (string, error) {
 
 	if username != "" {
 		token = a.TokenStore.GetOAuth2TokenForApp(a.appName, username)
+		// An explicitly named user with no stored token is an error, not a
+		// login trigger: silently running the browser flow here would mint
+		// a real token under whatever label was passed (typos included) and
+		// invalidate the account's previous grant.
+		if token == nil {
+			return "", xurlErrors.NewAuthError("TokenNotFound",
+				fmt.Errorf("no OAuth2 token stored for %q — run 'xurl auth oauth2 %s' to authenticate that account", username, username))
+		}
 	} else {
 		token = a.TokenStore.GetFirstOAuth2TokenForApp(a.appName)
 	}

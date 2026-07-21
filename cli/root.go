@@ -124,6 +124,10 @@ Commands are grouped by purpose below. Run 'xurl <command> --help' for details.`
 		&cobra.Group{ID: groupManage, Title: "Management:"},
 	)
 
+	chatCmd := CreateChatCommand(a)
+	chatCmd.GroupID = groupWrite
+	rootCmd.AddCommand(chatCmd)
+
 	authCmd := CreateAuthCommand(a)
 	mediaCmd := CreateMediaCommand(a)
 	versionCmd := CreateVersionCommand()

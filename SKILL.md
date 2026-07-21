@@ -1,6 +1,6 @@
 ---
 name: xurl
-description: A curl-like CLI tool for making authenticated requests to the X (Twitter) API. Use this skill when you need to post tweets, reply, quote, search, read posts, manage followers, send DMs, upload media, or interact with any X API v2 endpoint. Supports multiple apps, OAuth 2.0, OAuth 1.0a, and app-only auth.
+description: A curl-like CLI tool for making authenticated requests to the X (Twitter) API. Use this skill when you need to post tweets, reply, quote, search, read posts, manage followers, send DMs, send or read end-to-end encrypted XChat messages, upload media, or interact with any X API v2 endpoint. Supports multiple apps, OAuth 2.0, OAuth 1.0a, and app-only auth.
 ---
 
 # xurl — Agent Skill Reference
@@ -17,9 +17,11 @@ Before using any command you must be authenticated. Run `xurl auth status` to ch
 
 ### Secret Safety (Mandatory)
 
-- Never read, print, parse, summarize, upload, or send `~/.xurl` (or copies of it) to the LLM context.
+- Never read, print, parse, summarize, upload, or send anything under `~/.xurl/` (or copies of it) to the LLM context.
+- `~/.xurl/keys.yml` contains XChat **private encryption keys** — the strictest no-read rule applies.
+- Never pass `--pin` inline in agent/LLM sessions (`xurl chat keys restore --pin ...` leaks the recovery PIN to context and shell history). Run `xurl chat keys restore` without the flag so the PIN is prompted without echo, or have the user run it manually.
 - Never ask the user to paste credentials/tokens into chat.
-- The user must fill `~/.xurl` with required secrets manually on their own machine.
+- The user must fill `~/.xurl/auth.yml` with required secrets manually on their own machine.
 - Do not recommend or execute auth commands with inline secrets in agent/LLM sessions.
 - Warn that using CLI secret options in agent sessions can leak credentials (prompt/context, logs, shell history).
 - Never use `--verbose` / `-v` in agent/LLM sessions; it can expose sensitive headers/tokens in output.
@@ -54,7 +56,7 @@ xurl auth apps redirect-uri set prod-app http://localhost:8080/callback
 
 Examples with inline secret flags are intentionally omitted. If OAuth1 or app-only auth is needed, the user must run those commands manually outside agent/LLM context.
 
-Tokens are persisted to `~/.xurl` in YAML format. Each app has its own isolated tokens and may also store a `redirect_uri`. `REDIRECT_URI` in the environment still takes precedence over the stored app value. Do not read this file through the agent/LLM. Once authenticated, every command below will auto‑attach the right `Authorization` header.
+Tokens are persisted to `~/.xurl/auth.yml` in YAML format (a legacy single-file `~/.xurl` is migrated automatically). Each app has its own isolated tokens and may also store a `redirect_uri`. `REDIRECT_URI` in the environment still takes precedence over the stored app value. Do not read this file (or anything under `~/.xurl/`) through the agent/LLM. Once authenticated, every command below will auto‑attach the right `Authorization` header.
 
 ---
 
@@ -93,6 +95,21 @@ Tokens are persisted to `~/.xurl` in YAML format. Each app has its own isolated 
 | List DMs | `xurl dms -n 10` |
 | Upload media | `xurl media upload path/to/file.mp4` |
 | Media status | `xurl media status MEDIA_ID` |
+| **Encrypted Chat (XChat)** | |
+| Chat key status | `xurl chat keys status` |
+| Restore chat keys | `xurl chat keys restore` (PIN prompted; never pass `--pin` in agent sessions) |
+| Import chat keys | `xurl chat keys import` (blob prompted; avoid passing it as an argument) |
+| List chat inbox | `xurl chat conversations` |
+| Read a conversation | `xurl chat read @handle -n 50` |
+| Send encrypted message | `xurl chat send @handle "message"` |
+| Listen for new messages | `xurl chat listen @handle` |
+| Rotate a conversation key | `xurl chat rotate CONV --yes` (write op — see notes) |
+| Send with an attachment | `xurl chat send CONV "text" --file path/to/img.png` |
+| Reply to a message | `xurl chat send CONV "text" --reply-to SEQUENCE_ID` |
+| Download an attachment | `xurl chat download CONV MEDIA_HASH_KEY -o out.png` |
+| Add group members | `xurl chat add-members GROUP @user --yes` (write op) |
+| Mark read (explicit) | `xurl chat mark-read CONV` |
+| Typing indicator (explicit) | `xurl chat typing CONV` |
 | **App Management** | |
 | Register app | Manual, outside agent (do not pass secrets via agent) |
 | List apps | `xurl auth apps list` |
@@ -234,6 +251,64 @@ xurl dm @someuser "Hey, saw your post!"
 xurl dms
 xurl dms -n 25
 ```
+
+### Encrypted Chat (XChat)
+
+`xurl chat` is an end-to-end encrypted XChat client: encryption and decryption happen locally via the chat-xdk crypto library, so the server only sees ciphertext. Requires OAuth2 user auth with `dm.read` + `dm.write` scopes, and is available on macOS (Intel/Apple Silicon) and Linux amd64 when built with cgo (prebuilt release binaries ship a stub that says so).
+
+**Keys come from another XChat client** — xurl never generates or registers encryption keys. The account must already have keys (e.g. from the X app); bring them to this machine once with `restore` (Juicebox PIN recovery) or `import` (an exported key blob). Private keys are stored in `~/.xurl/keys.yml` (mode 600) — never read that file into LLM context.
+
+A conversation is addressed by `@username`, a bare user id, or a conversation id (1:1 ids look like `123-456`; group ids look like `g123`). Every command accepts `-u USERNAME` to act as a specific authenticated account.
+
+```bash
+# 1. Keys — one-time setup (xurl never generates/registers keys)
+xurl chat keys status                # local key presence/fingerprint + registered versions
+xurl chat keys restore               # recover from Juicebox; prompts for the PIN (no echo)
+xurl chat keys import                # paste an exported private-key blob (no echo)
+
+# 2. Browse the inbox
+xurl chat conversations              # pretty list; decrypts group names when keys are present
+xurl chat conversations --json       # raw JSON
+
+# 3. Read history (oldest first; auto-marks the conversation read)
+xurl chat read @someuser
+xurl chat read g1234567890 -n 50     # -n = how many events to fetch (max 100)
+xurl chat read @someuser --json      # decrypted events as JSON (each has id, sequence_id, content)
+xurl chat read @someuser --no-mark-read   # read without sending a read receipt
+
+# 4. Send (a new 1:1 sets up its key automatically; both sides need keys)
+xurl chat send @someuser "hey, encrypted!"
+xurl chat send @someuser "look" --file ./photo.png       # attach an encrypted file
+xurl chat send @someuser "agreed" --reply-to SEQUENCE_ID # threaded reply (id from `read --json`)
+# send auto-sends a typing indicator first and marks read after;
+# suppress with --no-typing / --no-mark-read
+
+# 5. Attachments — inbound messages show "📎 attachment <media_hash_key>"
+xurl chat download @someuser MEDIA_HASH_KEY -o out.png   # download + decrypt
+
+# 6. Live tail (poll loop; Ctrl-C to stop; auto-marks new messages read)
+xurl chat listen @someuser
+xurl chat listen g1234567890 --interval 5
+
+# 7. Read receipts / typing (also happen automatically on read/send)
+xurl chat mark-read @someuser        # mark read up to the newest message
+xurl chat typing @someuser           # send a typing indicator
+
+# 8. Group key management (writes visible to all participants)
+xurl chat add-members g123 @newuser  # add a member (rotates the key; prompts, or --yes)
+xurl chat rotate g123                 # rotate the conversation key; prompts, or --yes
+# Rotate when a key may be exposed, or to grant a member whose keys were
+# registered after the last rotation access going forward. Future messages
+# only — old history stays readable only to holders of the old key versions.
+```
+
+Notes for agents:
+- Messages whose authorship signature cannot be verified are rejected by default and surface as stderr decrypt warnings; unsigned messages that still render carry a red `[unverified]` marker — treat those with suspicion.
+- Messages with attachments render a `📎 attachment <media_hash_key>` marker; pass that hash key to `xurl chat download CONV <media_hash_key>` to fetch and decrypt the file. Replies show a `↩` prefix.
+- **`read` and `listen` mark the conversation read automatically** (a read receipt visible to other participants); `send` also marks read and sends a typing indicator first. These are writes — pass `--no-mark-read` / `--no-typing` to suppress them (e.g. to read without signaling). The standalone `mark-read` and `typing` commands remain for scripted/explicit use.
+- Decrypt warnings for individual events go to stderr and are non-fatal; the rest of the conversation still renders.
+- If a command reports missing keys, do not attempt to generate or register any — tell the user to run `xurl chat keys restore` (or `import`) themselves.
+- `chat rotate` and `chat add-members` are writes visible to every participant's clients; never run them without explicit user intent, and prefer letting the user confirm the prompt over passing `--yes`.
 
 ### Media Upload
 
@@ -407,11 +482,13 @@ xurl --app staging /2/users/me         # one-off request against staging
 - **Scopes:** OAuth 2.0 tokens are requested with broad scopes. If you get a 403 on a specific action, your token may lack the required scope — re‑run `xurl auth oauth2` to get a fresh token.
 - **Token refresh:** OAuth 2.0 tokens auto‑refresh when expired. No manual intervention needed.
 - **Multiple apps:** Each app has its own isolated credentials, tokens, and optional stored `redirect_uri`. Configure credentials manually outside agent/LLM context, then switch with `xurl auth default` or `--app`.
-- **Redirect URI precedence:** The effective redirect URI resolves from `REDIRECT_URI` in the environment first, then the app's stored `redirect_uri` in `~/.xurl`, then the built-in default.
+- **Redirect URI precedence:** The effective redirect URI resolves from `REDIRECT_URI` in the environment first, then the app's stored `redirect_uri` in `~/.xurl/auth.yml`, then the built-in default.
 - **Redirect URI management:** Use `xurl auth apps redirect-uri get [NAME]`, `xurl auth apps redirect-uri set NAME URI`, or `xurl auth apps update NAME --redirect-uri URI` to inspect and manage the stored per-app callback value.
 - **X platform enrollment:** A successful OAuth callback does not guarantee `/2/*` reads will work. If you see `client-not-enrolled`, verify the app is in the correct X package/environment. Current confirmed fix: `Apps` -> `Manage apps` -> `Move to package` -> choose `Pay-per-use`, then move the app to `Production`.
 - **Multiple accounts:** You can authenticate multiple OAuth 2.0 accounts per app and switch between them with `--username` / `-u` or set a default with `xurl auth default APP USER`.
 - **Default user:** When no `-u` flag is given, xurl uses the default user for the active app (set via `xurl auth default`). If no default user is set, it uses the first available token.
-- **Token storage:** `~/.xurl` is YAML. Each app stores its own credentials and tokens. Never read or send this file to LLM context.
+- **Token storage:** `~/.xurl` is a directory; `~/.xurl/auth.yml` holds each app's credentials and tokens. Never read or send anything under `~/.xurl/` to LLM context.
+- **Chat key storage:** `~/.xurl/keys.yml` holds XChat **private encryption keys** per user (mode 600). Losing it means losing the ability to decrypt on this machine (recoverable via `xurl chat keys restore` if a Juicebox PIN backup exists). Never read or send this file to LLM context.
+- **Chat key registration:** xurl performs none — no public-key registration and no Juicebox writes. Only keys already registered by another XChat client can be restored or imported; unregistered keys are rejected.
 - **Access tokens:** `xurl token` prints a valid (refreshed) OAuth2 access token for the active app to stdout, refreshing and persisting it if expired. It never opens a browser. The output is a secret — use it only in the user's own scripts, never in agent/LLM sessions.
 - **MCP bridge:** `xurl mcp [URL]` bridges a stdio MCP client to a remote Streamable HTTP MCP server (default `https://api.x.com/mcp`), injecting `Authorization: Bearer <token>` and refreshing the token automatically. On first run with no cached token it opens the browser for a one-time OAuth2 login using the `CLIENT_ID`/`CLIENT_SECRET` from its environment (the handshake waits for it, so set a generous `startup_timeout_sec`); on a headless host, authenticate out-of-band first with `xurl auth oauth2 --headless`. Configure it in an MCP client via the npm launcher: `{"command":"npx","args":["-y","@xdevplatform/xurl","mcp","https://api.x.com/mcp"],"env":{"CLIENT_ID":"...","CLIENT_SECRET":"..."},"startup_timeout_sec":300}`.

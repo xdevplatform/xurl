@@ -304,31 +304,17 @@ func TestCredentialBackfill(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	t.Setenv("HOME", tempDir)
-	xurlPath := filepath.Join(tempDir, ".xurl")
 
-	// Write a legacy JSON file (no credentials stored)
-	legacy := map[string]interface{}{
-		"oauth2_tokens": map[string]interface{}{
-			"user1": map[string]interface{}{
-				"type": "oauth2",
-				"oauth2": map[string]interface{}{
-					"access_token":    "at",
-					"refresh_token":   "rt",
-					"expiration_time": 9999,
-				},
-			},
-		},
-	}
-	data, _ := json.MarshalIndent(legacy, "", "  ")
-	os.WriteFile(xurlPath, data, 0600)
-
-	// First load without credentials — migration happens, no backfill
+	// An app with tokens but no stored client credentials (authenticated
+	// with CLIENT_ID/CLIENT_SECRET coming from env vars).
 	s1 := NewTokenStore()
+	require.NoError(t, s1.AddApp("default", "", ""))
+	require.NoError(t, s1.SaveOAuth2TokenForApp("default", "user1", "at", "rt", 9999))
 	app1 := s1.GetApp("default")
 	require.NotNil(t, app1)
 	assert.Empty(t, app1.ClientID, "Should have no client ID without backfill")
 
-	// Now load WITH credentials — should backfill the migrated app
+	// Loading WITH credentials should backfill the credential-less app.
 	s2 := NewTokenStoreWithCredentials("env-id", "env-secret")
 	app2 := s2.GetApp("default")
 	require.NotNil(t, app2)
@@ -475,7 +461,7 @@ func TestLegacyJSONMigration(t *testing.T) {
 
 	t.Setenv("HOME", tempDir)
 
-	// Write a legacy JSON .xurl file
+	// Write a pre-v1.0 legacy JSON .xurl file
 	legacy := map[string]interface{}{
 		"oauth2_tokens": map[string]interface{}{
 			"legacyuser": map[string]interface{}{
@@ -514,8 +500,10 @@ func TestLegacyJSONMigration(t *testing.T) {
 	require.NotNil(t, bearer)
 	assert.Equal(t, "leg-bearer", bearer.Bearer)
 
-	// File should now be YAML
-	raw, _ := os.ReadFile(xurlPath)
+	// File should now be YAML, living inside the ~/.xurl directory after
+	// the legacy-file migration.
+	assert.Equal(t, filepath.Join(xurlPath, "auth.yml"), store.FilePath)
+	raw, _ := os.ReadFile(store.FilePath)
 	assert.Contains(t, string(raw), "apps:")
 	assert.Contains(t, string(raw), "default_app:")
 }

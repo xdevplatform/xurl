@@ -367,6 +367,13 @@ func (c *ApiClient) getAuthHeader(method, url string, authType string, username 
 		if err == nil {
 			return accessToken, nil
 		}
+		// When a specific user was requested (-u/--username), do not silently
+		// downgrade to OAuth1 or app-only auth: that hides the failure and
+		// would act as a different principal than asked. Surface the error so
+		// the caller learns to re-authenticate that account.
+		if username != "" {
+			return "", err
+		}
 	}
 
 	// If no OAuth2 token is available, try to use the first OAuth1 token
