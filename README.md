@@ -390,61 +390,43 @@ xurl '/2/media/upload?command=STATUS&media_id=MEDIA_ID'
 decryption happen locally using the official [chat-xdk](https://github.com/xdevplatform/chat-xdk)
 crypto library; the server only ever sees ciphertext.
 
-xurl never generates or registers encryption keys — the account must already have
-XChat keys, registered by another XChat client (e.g. the X app). One-time setup
-brings those existing keys to this machine (requires an OAuth2 user login with the
-`dm.read` and `dm.write` scopes):
+**Keys must already exist.** xurl never generates or registers encryption keys — the
+account needs XChat keys from another client (e.g. the X app). Bring them to this
+machine once (needs an OAuth2 login with the `dm.read` + `dm.write` scopes):
 ```bash
-xurl chat keys restore      # recover keys from Juicebox with your recovery PIN, or
-xurl chat keys import       # paste a private-key blob exported by another client
-```
-
-Send and read messages (conversations can be addressed by `@username`, user id,
-or conversation id like `123-456` / `g123`):
-```bash
-xurl chat send @bob "hello, encrypted world"
-xurl chat read @bob
-xurl chat read @bob --json          # decrypted events as JSON
-xurl chat conversations             # list your inbox
-xurl chat listen @bob               # print new messages as they arrive (Ctrl-C to stop)
-xurl chat rotate @bob               # rotate the conversation key (future messages only)
-
-# Attachments, replies, receipts, and group membership
-xurl chat send @bob "look" --file photo.png   # encrypt + upload an attachment
-xurl chat send @bob "agreed" --reply-to 1234  # reply to an event (sequence id from --json)
-xurl chat download @bob MEDIA_HASH_KEY -o out.png  # download + decrypt an attachment
-xurl chat add-members g123 @carol             # add a member (rotates the group key)
-xurl chat mark-read @bob                       # explicit mark-read (also automatic on read/listen/send)
-xurl chat typing @bob                          # explicit typing indicator (also automatic before send)
-```
-
-`read`, `listen`, and `send` mark the conversation read automatically (marking the
-newest message read clears everything before it), and `send` sends a typing indicator
-first. Suppress these writes with `--no-mark-read` / `--no-typing`.
-
-Sending to someone new establishes the conversation automatically: xurl generates a
-conversation key, encrypts it to both participants' newest registered keys, and sends.
-`rotate` runs the same key change on an existing conversation — use it if a key may be
-exposed, or to give a participant whose keys are newer than the last rotation access to
-messages from now on (old history stays unreadable to them by design).
-
-Key management:
-```bash
+xurl chat keys restore              # recover from Juicebox with your PIN, or
+xurl chat keys import               # paste a private-key blob exported elsewhere
 xurl chat keys status               # local + registered key state and fingerprint
-xurl chat keys restore              # recover keys from Juicebox (read-only; xurl never writes to Juicebox)
-xurl chat keys import               # import a private-key blob exported by another client
 ```
+
+Conversations are addressed by `@username`, user id, or conversation id (`123-456`, `g123`):
+```bash
+xurl chat conversations                            # list your inbox
+xurl chat read @bob [-n 50] [--json]               # decrypted history (auto marks read)
+xurl chat listen @bob                              # live tail (Ctrl-C to stop)
+xurl chat send @bob "hello"                        # send (new 1:1 keys itself)
+xurl chat send @bob "look" --file photo.png        # attach an encrypted file
+xurl chat send @bob "ok" --reply-to SEQUENCE_ID    # threaded reply (id from read --json)
+xurl chat download @bob MEDIA_HASH_KEY -o out.png  # download + decrypt an attachment
+xurl chat rotate @bob                              # rotate the conversation key
+xurl chat add-members g123 @carol                  # add a group member (rotates the key)
+xurl chat mark-read @bob                           # (also automatic on read/listen/send)
+xurl chat typing @bob                              # (also automatic before send)
+```
+
+`read`, `listen`, and `send` mark the conversation read automatically, and `send` sends a
+typing indicator first; suppress with `--no-mark-read` / `--no-typing`. `rotate` and
+`add-members` change the key for every participant and protect future messages only —
+old history stays readable only to holders of the earlier key versions.
 
 Notes:
 
-- xurl performs no key registration of any kind: it never calls the public-key
-  registration endpoint and never writes to Juicebox. Keys that are not already
-  registered on the account are rejected on restore/import.
-- Private keys are stored in `~/.xurl/keys.yml` (mode 600). Losing this file is safe
-  as long as the Juicebox backup (made by the original client) still exists.
-- `chat` requires cgo and is supported on macOS (Intel/Apple Silicon) and Linux
-  (amd64). Prebuilt release binaries are cross-compiled without cgo and ship a stub;
-  build from source on a supported platform to enable it:
+- Keys not already registered on the account are rejected on restore/import; xurl never
+  writes to Juicebox or the key-registration endpoint.
+- Private keys live in `~/.xurl/keys.yml` (mode 600). Losing it is safe as long as the
+  Juicebox backup (made by the original client) still exists.
+- `chat` requires a cgo build on macOS (Intel/Apple Silicon) or Linux (amd64). Prebuilt
+  release binaries ship a stub; build from source to enable it:
   `CGO_ENABLED=1 go install github.com/xdevplatform/xurl@latest`.
 
 ## Token Storage

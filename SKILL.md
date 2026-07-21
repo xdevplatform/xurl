@@ -258,37 +258,48 @@ xurl dms -n 25
 
 **Keys come from another XChat client** — xurl never generates or registers encryption keys. The account must already have keys (e.g. from the X app); bring them to this machine once with `restore` (Juicebox PIN recovery) or `import` (an exported key blob). Private keys are stored in `~/.xurl/keys.yml` (mode 600) — never read that file into LLM context.
 
+A conversation is addressed by `@username`, a bare user id, or a conversation id (1:1 ids look like `123-456`; group ids look like `g123`). Every command accepts `-u USERNAME` to act as a specific authenticated account.
+
 ```bash
-# One-time setup: check state, then fetch existing keys
+# 1. Keys — one-time setup (xurl never generates/registers keys)
 xurl chat keys status                # local key presence/fingerprint + registered versions
 xurl chat keys restore               # recover from Juicebox; prompts for the PIN (no echo)
-xurl chat keys import                # paste an exported private-key blob; prompted (no echo)
+xurl chat keys import                # paste an exported private-key blob (no echo)
 
-# Conversations can be addressed by @username, user id, or conversation id
-# (1:1 ids look like 123-456; group ids look like g123).
-xurl chat conversations              # inbox list; decrypts group names when keys are present
-xurl chat conversations --json       # raw JSON instead of the pretty listing
+# 2. Browse the inbox
+xurl chat conversations              # pretty list; decrypts group names when keys are present
+xurl chat conversations --json       # raw JSON
 
-# Read decrypted history (oldest first)
+# 3. Read history (oldest first; auto-marks the conversation read)
 xurl chat read @someuser
-xurl chat read g1234567890 -n 50
-xurl chat read @someuser --json      # decrypted events as JSON
+xurl chat read g1234567890 -n 50     # -n = how many events to fetch (max 100)
+xurl chat read @someuser --json      # decrypted events as JSON (each has id, sequence_id, content)
+xurl chat read @someuser --no-mark-read   # read without sending a read receipt
 
-# Send an encrypted message (first message to a new 1:1 sets up the
-# conversation key automatically; both sides need registered keys)
+# 4. Send (a new 1:1 sets up its key automatically; both sides need keys)
 xurl chat send @someuser "hey, encrypted!"
-xurl chat send 123-456 "hello again"
+xurl chat send @someuser "look" --file ./photo.png       # attach an encrypted file
+xurl chat send @someuser "agreed" --reply-to SEQUENCE_ID # threaded reply (id from `read --json`)
+# send auto-sends a typing indicator first and marks read after;
+# suppress with --no-typing / --no-mark-read
 
-# Print new messages as they arrive (poll loop; Ctrl-C to stop)
+# 5. Attachments — inbound messages show "📎 attachment <media_hash_key>"
+xurl chat download @someuser MEDIA_HASH_KEY -o out.png   # download + decrypt
+
+# 6. Live tail (poll loop; Ctrl-C to stop; auto-marks new messages read)
 xurl chat listen @someuser
 xurl chat listen g1234567890 --interval 5
 
-# Rotate a conversation's encryption key (visible to other participants).
-# Use when a key may be exposed, or to grant a member access going forward
-# when their keys were registered after the last rotation. Future messages
-# only: old history stays readable only to holders of the old versions.
-xurl chat rotate g1234567890          # prompts for confirmation
-xurl chat rotate @someuser --yes      # skip the prompt (required non-TTY)
+# 7. Read receipts / typing (also happen automatically on read/send)
+xurl chat mark-read @someuser        # mark read up to the newest message
+xurl chat typing @someuser           # send a typing indicator
+
+# 8. Group key management (writes visible to all participants)
+xurl chat add-members g123 @newuser  # add a member (rotates the key; prompts, or --yes)
+xurl chat rotate g123                 # rotate the conversation key; prompts, or --yes
+# Rotate when a key may be exposed, or to grant a member whose keys were
+# registered after the last rotation access going forward. Future messages
+# only — old history stays readable only to holders of the old key versions.
 ```
 
 Notes for agents:
@@ -297,7 +308,9 @@ Notes for agents:
 - **`read` and `listen` mark the conversation read automatically** (a read receipt visible to other participants); `send` also marks read and sends a typing indicator first. These are writes — pass `--no-mark-read` / `--no-typing` to suppress them (e.g. to read without signaling). The standalone `mark-read` and `typing` commands remain for scripted/explicit use.
 - Decrypt warnings for individual events go to stderr and are non-fatal; the rest of the conversation still renders.
 - If a command reports missing keys, do not attempt to generate or register any — tell the user to run `xurl chat keys restore` (or `import`) themselves.
-- `chat rotate` is a write visible to every participant's clients; never run it without explicit user intent, and prefer letting the user confirm the prompt over passing `--yes`.
+- `chat rotate` and `chat add-members` are writes visible to every participant's clients; never run them without explicit user intent, and prefer letting the user confirm the prompt over passing `--yes`.
+
+### Media Upload
 
 ```bash
 # Upload a file (auto‑detects type for images/videos)
