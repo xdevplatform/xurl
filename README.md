@@ -408,6 +408,14 @@ xurl chat read @bob --json          # decrypted events as JSON
 xurl chat conversations             # list your inbox
 xurl chat listen @bob               # print new messages as they arrive (Ctrl-C to stop)
 xurl chat rotate @bob               # rotate the conversation key (future messages only)
+
+# Attachments, replies, receipts, and group membership
+xurl chat send @bob "look" --file photo.png   # encrypt + upload an attachment
+xurl chat send @bob "agreed" --reply-to 1234  # reply to an event (sequence id from --json)
+xurl chat download @bob MEDIA_HASH_KEY -o out.png  # download + decrypt an attachment
+xurl chat add-members g123 @carol             # add a member (rotates the group key)
+xurl chat mark-read @bob                       # mark read up to the latest message
+xurl chat typing @bob                          # send a typing indicator
 ```
 
 Sending to someone new establishes the conversation automatically: xurl generates a

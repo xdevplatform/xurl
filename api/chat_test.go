@@ -59,6 +59,24 @@ func setupChatServer(t *testing.T, requests *[]*http.Request, bodies *[]string) 
 			w.Write([]byte(`{"data":{"encoded_message_event":"BBBB"}}`))
 		case r.URL.Path == "/2/chat/conversations":
 			w.Write([]byte(`{"data":[{"id":"1:2","type":"direct"}],"meta":{"result_count":1}}`))
+		case strings.HasSuffix(r.URL.Path, "/read"):
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"data":{"success":true}}`))
+		case strings.HasSuffix(r.URL.Path, "/typing"):
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"data":{"success":true}}`))
+		case strings.HasSuffix(r.URL.Path, "/members"):
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"data":{"conversation_key_change_sequence_id":"99"}}`))
+		case r.URL.Path == "/2/chat/media/upload/initialize":
+			w.Write([]byte(`{"data":{"session_id":"sess1","media_hash_key":"mhk1","conversation_id":"1:2"}}`))
+		case strings.HasSuffix(r.URL.Path, "/append"):
+			w.Write([]byte(`{"data":{"expires_at":123}}`))
+		case strings.HasSuffix(r.URL.Path, "/finalize"):
+			w.Write([]byte(`{"data":{"success":true}}`))
+		case strings.HasPrefix(r.URL.Path, "/2/chat/media/"):
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write([]byte("RAWCIPHERTEXT"))
 		default:
 			w.Write([]byte(`{"data":{}}`))
 		}
@@ -159,6 +177,75 @@ func TestSendChatMessage(t *testing.T) {
 	// Empty optional token is omitted entirely.
 	_, hasToken := sent["conversation_token"]
 	assert.False(t, hasToken)
+}
+
+func TestMarkChatReadAndTyping(t *testing.T) {
+	var requests []*http.Request
+	var bodies []string
+	server := setupChatServer(t, &requests, &bodies)
+	defer server.Close()
+	client := chatTestClient(t, server)
+
+	_, err := MarkChatRead(client, "1:2", "77", RequestOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "/2/chat/conversations/1-2/read", requests[0].URL.Path)
+	assert.Contains(t, bodies[0], `"seen_until_sequence_id":"77"`)
+
+	_, err = SendChatTyping(client, "1:2", RequestOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "/2/chat/conversations/1-2/typing", requests[1].URL.Path)
+}
+
+func TestChatMediaRoundTrip(t *testing.T) {
+	var requests []*http.Request
+	var bodies []string
+	server := setupChatServer(t, &requests, &bodies)
+	defer server.Close()
+	client := chatTestClient(t, server)
+
+	sessionID, mhk, err := InitializeChatMediaUpload(client, "1:2", 10, RequestOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "sess1", sessionID)
+	assert.Equal(t, "mhk1", mhk)
+	assert.Equal(t, "/2/chat/media/upload/initialize", requests[0].URL.Path)
+
+	err = UploadChatMedia(client, sessionID, "1:2", mhk, []byte("ciphertextbytes"), RequestOptions{})
+	require.NoError(t, err)
+	// One append (small payload) + one finalize.
+	assert.Equal(t, "/2/chat/media/upload/sess1/append", requests[1].URL.Path)
+	assert.Equal(t, "/2/chat/media/upload/sess1/finalize", requests[2].URL.Path)
+
+	data, err := DownloadChatMedia(client, "1:2", mhk, RequestOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "RAWCIPHERTEXT", string(data))
+	assert.Equal(t, "/2/chat/media/1-2/mhk1", requests[3].URL.Path)
+}
+
+func TestAddChatGroupMembers(t *testing.T) {
+	var requests []*http.Request
+	var bodies []string
+	server := setupChatServer(t, &requests, &bodies)
+	defer server.Close()
+	client := chatTestClient(t, server)
+
+	body := map[string]any{"user_ids": []string{"7"}, "conversation_key_version": "v2"}
+	_, err := AddChatGroupMembers(client, "g123", body, RequestOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "/2/chat/conversations/g123/members", requests[0].URL.Path)
+	assert.Contains(t, bodies[0], `"user_ids"`)
+}
+
+func TestGetChatConversationMeta(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":{"participant_ids":["1","2"],"member_ids":["1","2","3"],"admin_ids":["1"],"group_name":"enc"}}`))
+	}))
+	defer server.Close()
+	client := chatTestClient(t, server)
+
+	meta, _, err := GetChatConversation(client, "g123", RequestOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "enc", meta.GroupName)
+	assert.ElementsMatch(t, []string{"1", "2", "3"}, meta.AllUserIDs())
 }
 
 func TestGetChatConversations(t *testing.T) {

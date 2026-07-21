@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,8 +62,101 @@ dm.read and dm.write scopes (run 'xurl auth oauth2' first).`,
 		chatSendCmd(a),
 		chatListenCmd(a),
 		chatRotateCmd(a),
+		chatDownloadCmd(a),
+		chatMembersCmd(a),
+		chatMarkReadCmd(a),
+		chatTypingCmd(a),
 	)
 	return chatCmd
+}
+
+func chatDownloadCmd(a *auth.Auth) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "download CONVERSATION|@USERNAME MEDIA_HASH_KEY",
+		Short: "Download and decrypt a chat media attachment",
+		Long: `Downloads an encrypted media attachment and decrypts it to a local
+file. Find the media hash key with 'chat read --json' (attachments carry
+a media_hash_key). The attachment is decrypted with the conversation key
+version that was active when the message was sent.`,
+		Args: cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			out, _ := cmd.Flags().GetString("output")
+			s, err := newChatSession(a, cmd, true)
+			exitOnError(err)
+			defer s.Close()
+			convID, err := s.resolveConversation(args[0])
+			exitOnError(err)
+			exitOnError(s.downloadMedia(convID, args[1], out))
+		},
+	}
+	cmd.Flags().StringP("output", "o", "", "Output file path (default: the media hash key)")
+	addCommonFlags(cmd)
+	return cmd
+}
+
+func chatMembersCmd(a *auth.Auth) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add-members GROUP @USER [@USER...]",
+		Short: "Add members to a group conversation",
+		Long: `Adds one or more members to an existing group, rotating the
+conversation key so the new members can read messages from now on. Only a
+current member can add members. New members do not gain access to messages
+sent before they were added.`,
+		Args: cobra.MinimumNArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			yes, _ := cmd.Flags().GetBool("yes")
+			s, err := newChatSession(a, cmd, true)
+			exitOnError(err)
+			defer s.Close()
+			convID, err := s.resolveConversation(args[0])
+			exitOnError(err)
+			if !strings.HasPrefix(convID, "g") {
+				exitOnError(fmt.Errorf("add-members only applies to group conversations (got %s)", convID))
+			}
+			exitOnError(s.addGroupMembers(convID, args[1:], yes))
+		},
+	}
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	addCommonFlags(cmd)
+	return cmd
+}
+
+func chatMarkReadCmd(a *auth.Auth) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mark-read CONVERSATION|@USERNAME",
+		Short: "Mark a conversation read up to its latest message",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			s, err := newChatSession(a, cmd, false)
+			exitOnError(err)
+			defer s.Close()
+			convID, err := s.resolveConversation(args[0])
+			exitOnError(err)
+			exitOnError(s.markReadCommand(convID))
+		},
+	}
+	addCommonFlags(cmd)
+	return cmd
+}
+
+func chatTypingCmd(a *auth.Auth) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "typing CONVERSATION|@USERNAME",
+		Short: "Send a typing indicator to a conversation",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			s, err := newChatSession(a, cmd, false)
+			exitOnError(err)
+			defer s.Close()
+			convID, err := s.resolveConversation(args[0])
+			exitOnError(err)
+			_, err = api.SendChatTyping(s.client, convID, s.opts)
+			exitOnError(err)
+			color.Green("✓ typing indicator sent")
+		},
+	}
+	addCommonFlags(cmd)
+	return cmd
 }
 
 func chatRotateCmd(a *auth.Auth) *cobra.Command {
@@ -228,16 +322,29 @@ func chatSendCmd(a *auth.Auth) *cobra.Command {
 		Long: `Encrypts and sends a message. On the first message of a 1:1
 conversation, a conversation key is generated and distributed to both
 participants automatically.`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.RangeArgs(1, 2),
 		Run: func(cmd *cobra.Command, args []string) {
+			file, _ := cmd.Flags().GetString("file")
+			replyTo, _ := cmd.Flags().GetString("reply-to")
+			markRead, _ := cmd.Flags().GetBool("mark-read")
+			text := ""
+			if len(args) == 2 {
+				text = args[1]
+			}
+			if text == "" && file == "" {
+				exitOnError(fmt.Errorf("provide message text, --file, or both"))
+			}
 			s, err := newChatSession(a, cmd, true)
 			exitOnError(err)
 			defer s.Close()
 			convID, err := s.resolveConversation(args[0])
 			exitOnError(err)
-			exitOnError(s.sendMessage(convID, args[1]))
+			exitOnError(s.sendMessage(convID, text, sendOptions{filePath: file, replyToID: replyTo, markRead: markRead}))
 		},
 	}
+	cmd.Flags().StringP("file", "F", "", "Attach an encrypted media file")
+	cmd.Flags().String("reply-to", "", "Sequence id of the event to reply to")
+	cmd.Flags().Bool("mark-read", false, "Mark the conversation read after sending")
 	addCommonFlags(cmd)
 	return cmd
 }
@@ -869,12 +976,12 @@ func (s *chatSession) ensureParticipantKeys(conversationID string) {
 		return
 	}
 	s.loadedConvs[conversationID] = true
-	ids, _, err := api.GetChatConversation(s.client, conversationID, s.opts)
+	meta, _, err := api.GetChatConversation(s.client, conversationID, s.opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not fetch conversation participants: %v\n", err)
 		return
 	}
-	s.loadSigningKeys(ids)
+	s.loadSigningKeys(meta.AllUserIDs())
 }
 
 // loadBacklog fetches one page of events, batch-decrypts it (filling the
@@ -1152,16 +1259,24 @@ func (s *chatSession) printEvent(event *chatxdk.Event, verbose bool) {
 	switch msg.Content.ContentType {
 	case "Text":
 		text := msg.Text()
-		var suffix string
+		var prefix, suffix string
+		if tc := msg.Content.TextContent; tc != nil && len(tc.ReplyingToPreview) > 0 {
+			prefix = color.New(color.Faint).Sprint("↩ ")
+		}
 		if n := max(len(msg.MediaHashes), len(msg.Attachments)); n > 0 {
 			count := ""
 			if n > 1 {
 				count = fmt.Sprintf(" ×%d", n)
 			}
+			marker := "📎 attachment" + count
+			// Show the hash key so it can be passed to 'chat download'.
+			if len(msg.MediaHashes) > 0 {
+				marker += " " + msg.MediaHashes[0].MediaHashKey
+			}
 			if text == "" {
-				text = color.New(color.Faint).Sprintf("📎 attachment%s", count)
+				text = color.New(color.Faint).Sprint(marker)
 			} else {
-				suffix = color.New(color.Faint).Sprintf("  📎%s", count)
+				suffix = color.New(color.Faint).Sprintf("  %s", marker)
 			}
 		}
 		if text == "" {
@@ -1172,7 +1287,7 @@ func (s *chatSession) printEvent(event *chatxdk.Event, verbose bool) {
 		}
 		timeStyle.Printf("%s  ", ts)
 		senderStyle.Print(sender)
-		fmt.Printf("  %s%s\n", text, suffix)
+		fmt.Printf("  %s%s%s\n", prefix, text, suffix)
 	case "Reaction":
 		if msg.Content.ReactionContent != nil {
 			timeStyle.Printf("%s  ", ts)
@@ -1194,9 +1309,16 @@ func (s *chatSession) printEvent(event *chatxdk.Event, verbose bool) {
 // Sending
 // -----------------------------------------------------------------
 
-func (s *chatSession) sendMessage(conversationID, text string) error {
-	// Load the backlog first: it fills the SDK's conversation-key cache with
-	// the current key, and tells us whether the conversation exists at all.
+// sendOptions carries the optional extras for a send.
+type sendOptions struct {
+	filePath  string // attach an encrypted media file
+	replyToID string // reply to the event with this sequence id
+	markRead  bool   // mark the conversation read after sending
+}
+
+func (s *chatSession) sendMessage(conversationID, text string, sopts sendOptions) error {
+	// Load the backlog: it extracts the conversation key and tells us whether
+	// the conversation exists.
 	result, events, _, err := s.loadBacklog(conversationID, 100, "")
 	if err != nil && !isNotFoundError(err) {
 		// Only a missing conversation may proceed to key initialization; any
@@ -1206,7 +1328,7 @@ func (s *chatSession) sendMessage(conversationID, text string) error {
 
 	// The message signature covers the conversation id in its canonical
 	// (colon) form; prefer the id carried inside a decrypted event, then the
-	// one on the raw event items, then the caller-derived form.
+	// raw event items, then the caller-derived form.
 	signConvID := api.ChatConversationEventID(conversationID)
 	for _, e := range events {
 		if e.ConversationID != "" {
@@ -1227,56 +1349,49 @@ func (s *chatSession) sendMessage(conversationID, text string) error {
 		}
 	}
 
-	// Encrypt with the first key source that works: the SDK's verified key
-	// cache (filled by the backlog decrypt), then the ECIES-extracted
-	// session keys (see adoptKeyEvents), and only then — for a 1:1 with no
-	// key at all — a freshly initialized conversation key.
+	// Resolve the raw conversation key (needed to encrypt media under the
+	// same key as the message), initializing or rotating only with consent.
+	rawKey, keyVer, newSignConvID, err := s.resolveSendKey(conversationID, signConvID, result, len(events) > 0)
+	if err != nil {
+		return err
+	}
+	signConvID = newSignConvID
+
 	params := chatxdk.EncryptMessageParams{
-		ConversationID: signConvID,
-		Text:           text,
+		ConversationID:         signConvID,
+		Text:                   text,
+		ConversationKey:        rawKey,
+		ConversationKeyVersion: keyVer,
 	}
-	payload, encErr := s.chat.EncryptMessage(params)
-	if encErr != nil {
-		if v := latestKeyVersion(s.convKeys); v != "" {
-			params.ConversationKey = s.convKeys[v]
-			params.ConversationKeyVersion = v
-			payload, encErr = s.chat.EncryptMessage(params)
-		}
-	}
-	if encErr != nil {
-		if strings.HasPrefix(conversationID, "g") {
-			return fmt.Errorf("no usable conversation key for group %s (were this device's keys registered after the last key rotation?): %w", conversationID, encErr)
-		}
-		// A 1:1 with history but no usable key means rotating would be
-		// visible to the other participant's clients — never do it as a
-		// silent side effect of "send".
-		if len(events) > 0 {
-			fmt.Fprintf(os.Stderr, "This conversation exists but none of its keys are readable by this device (%v).\n", encErr)
-			fmt.Fprintln(os.Stderr, "Sending will rotate the conversation key: earlier messages stay unreadable here, and the other participant's clients will see a key change.")
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("refusing to rotate the conversation key non-interactively — run again from a terminal to confirm")
-			}
-			fmt.Fprint(os.Stderr, "Rotate and send? [y/N] ")
-			var answer string
-			_, _ = fmt.Scanln(&answer)
-			if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
-				return fmt.Errorf("send aborted")
-			}
-		}
-		// Fresh (or confirmed key-less) 1:1 conversation: generate and
-		// distribute a conversation key to every participant.
-		prepared, confirmedID, err := s.prepareOneToOneKey(conversationID)
+
+	// Attach an encrypted media file, if requested.
+	if sopts.filePath != "" {
+		att, err := s.uploadMedia(signConvID, sopts.filePath, rawKey)
 		if err != nil {
 			return err
 		}
-		signConvID = api.ChatConversationEventID(confirmedID)
-		params.ConversationID = signConvID
-		params.ConversationKey = prepared.ConversationKey
-		params.ConversationKeyVersion = prepared.ConversationKeyVersion
-		payload, encErr = s.chat.EncryptMessage(params)
+		params.Attachments = []chatxdk.AttachmentDescriptor{*att}
 	}
-	if encErr != nil {
-		return fmt.Errorf("failed to encrypt message: %w", encErr)
+
+	var payload *chatxdk.SendPayload
+	if sopts.replyToID != "" {
+		rawEvent := findEncodedEvent(events, sopts.replyToID)
+		if rawEvent == "" {
+			return fmt.Errorf("could not find event %s in the recent history to reply to", sopts.replyToID)
+		}
+		payload, err = s.chat.EncryptReply(chatxdk.EncryptReplyParams{
+			ConversationID:         signConvID,
+			Text:                   text,
+			ReplyToEvent:           rawEvent,
+			ConversationKey:        rawKey,
+			ConversationKeyVersion: keyVer,
+			Attachments:            params.Attachments,
+		})
+	} else {
+		payload, err = s.chat.EncryptMessage(params)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to encrypt message: %w", err)
 	}
 
 	resp, err := api.SendChatMessage(s.client, signConvID, api.ChatSendBody{
@@ -1290,10 +1405,294 @@ func (s *chatSession) sendMessage(conversationID, text string) error {
 
 	fmt.Printf("%s %s\n", color.GreenString("✓ sent to"), api.ChatConversationPathID(signConvID))
 	color.New(color.Faint).Printf("  message id %s\n", payload.MessageID)
+	if sopts.markRead {
+		s.markReadLatest(signConvID, events)
+	}
 	if s.opts.Verbose {
 		utils.FormatAndPrintResponse(resp)
 	}
 	return nil
+}
+
+// resolveSendKey returns the raw conversation key and version to encrypt a
+// message and any media under, plus the canonical conversation id. It uses
+// the newest key already readable on the conversation; failing that, it
+// initializes a fresh key for a new 1:1, or — for an existing 1:1 whose key
+// this device cannot read — rotates only after explicit confirmation. A
+// group with no readable key is an error (join/rotation is a separate step).
+func (s *chatSession) resolveSendKey(conversationID, signConvID string, result *chatxdk.DecryptEventsResult, hasHistory bool) (rawKey []byte, keyVer, outConvID string, err error) {
+	keys := map[string][]byte{}
+	if result != nil {
+		for v, k := range result.ConversationKeys.Keys {
+			keys[v] = k
+		}
+	}
+	for v, k := range s.convKeys {
+		keys[v] = k
+	}
+	if v := latestKeyVersion(keys); v != "" {
+		return keys[v], v, signConvID, nil
+	}
+
+	if strings.HasPrefix(conversationID, "g") {
+		return nil, "", "", fmt.Errorf("no usable conversation key for group %s — its key was not encrypted to this device (try 'xurl chat rotate %s' from a current member, or ask to be re-added)", conversationID, conversationID)
+	}
+	if hasHistory {
+		fmt.Fprintf(os.Stderr, "This conversation exists but none of its keys are readable by this device.\n")
+		fmt.Fprintln(os.Stderr, "Sending will rotate the conversation key: earlier messages stay unreadable here, and the other participant's clients will see a key change.")
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return nil, "", "", fmt.Errorf("refusing to rotate the conversation key non-interactively — run again from a terminal to confirm")
+		}
+		fmt.Fprint(os.Stderr, "Rotate and send? [y/N] ")
+		var answer string
+		_, _ = fmt.Scanln(&answer)
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			return nil, "", "", fmt.Errorf("send aborted")
+		}
+	}
+	prepared, confirmedID, err := s.prepareOneToOneKey(conversationID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return prepared.ConversationKey, prepared.ConversationKeyVersion, api.ChatConversationEventID(confirmedID), nil
+}
+
+// findEncodedEvent returns the raw base64 event whose id matches, or "".
+func findEncodedEvent(events []api.ChatEventItem, id string) string {
+	for _, e := range events {
+		if e.ID == id {
+			return e.EncodedEvent
+		}
+	}
+	return ""
+}
+
+// markReadLatest marks the conversation read up to the newest event's
+// sequence id (best-effort; failures warn but don't fail the send).
+func (s *chatSession) markReadLatest(conversationID string, events []api.ChatEventItem) {
+	newest := ""
+	for _, e := range events {
+		if api.CompareChatKeyVersions(e.ID, newest) > 0 {
+			newest = e.ID
+		}
+	}
+	if newest == "" {
+		return
+	}
+	if _, err := api.MarkChatRead(s.client, conversationID, newest, s.opts); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not mark read: %v\n", err)
+	}
+}
+
+// downloadMedia fetches and decrypts a media attachment to a local file,
+// trying every conversation key this device holds (the attachment was
+// encrypted under the key version active when its message was sent).
+func (s *chatSession) downloadMedia(conversationID, mediaHashKey, outPath string) error {
+	// Load the backlog so the conversation keys are available.
+	result, _, _, err := s.loadBacklog(conversationID, 100, "")
+	if err != nil && !isNotFoundError(err) {
+		return err
+	}
+	keys := map[string][]byte{}
+	if result != nil {
+		for v, k := range result.ConversationKeys.Keys {
+			keys[v] = k
+		}
+	}
+	for v, k := range s.convKeys {
+		keys[v] = k
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("no conversation key available to decrypt media in %s", conversationID)
+	}
+
+	ciphertext, err := api.DownloadChatMedia(s.client, conversationID, mediaHashKey, s.opts)
+	if err != nil {
+		return err
+	}
+
+	// Try newest key first; the right version decrypts, others fail cleanly.
+	versions := make([]string, 0, len(keys))
+	for v := range keys {
+		versions = append(versions, v)
+	}
+	sort.Slice(versions, func(i, j int) bool {
+		return api.CompareChatKeyVersions(versions[i], versions[j]) > 0
+	})
+	var plaintext []byte
+	for _, v := range versions {
+		if pt, derr := s.chat.DecryptStream(ciphertext, keys[v]); derr == nil {
+			plaintext = pt
+			break
+		}
+	}
+	if plaintext == nil {
+		return fmt.Errorf("could not decrypt media with any available conversation key (%d tried)", len(versions))
+	}
+
+	if outPath == "" {
+		outPath = mediaHashKey
+	}
+	if err := os.WriteFile(outPath, plaintext, 0600); err != nil {
+		return err
+	}
+	fmt.Printf("%s %s (%d bytes)\n", color.GreenString("✓ saved"), outPath, len(plaintext))
+	return nil
+}
+
+// markReadCommand marks a conversation read up to its newest event.
+func (s *chatSession) markReadCommand(conversationID string) error {
+	page, err := api.GetChatEvents(s.client, conversationID, 1, "", s.opts)
+	if err != nil {
+		return err
+	}
+	if len(page.Events) == 0 {
+		fmt.Println("Nothing to mark read.")
+		return nil
+	}
+	newest := ""
+	for _, e := range page.Events {
+		if api.CompareChatKeyVersions(e.ID, newest) > 0 {
+			newest = e.ID
+		}
+	}
+	if _, err := api.MarkChatRead(s.client, conversationID, newest, s.opts); err != nil {
+		return err
+	}
+	fmt.Printf("%s %s (through sequence %s)\n", color.GreenString("✓ marked read"), api.ChatConversationPathID(conversationID), newest)
+	return nil
+}
+
+// addGroupMembers adds members to a group, rotating the conversation key so
+// the new roster can read messages going forward.
+func (s *chatSession) addGroupMembers(conversationID string, newMembers []string, skipConfirm bool) error {
+	// Resolve the new members to user ids.
+	var newIDs []string
+	for _, m := range newMembers {
+		id, err := s.resolveUserToID(m)
+		if err != nil {
+			return err
+		}
+		newIDs = append(newIDs, id)
+	}
+
+	meta, _, err := api.GetChatConversation(s.client, conversationID, s.opts)
+	if err != nil {
+		return fmt.Errorf("could not fetch the group: %w", err)
+	}
+	current := meta.AllUserIDs()
+
+	if !skipConfirm {
+		var names []string
+		for _, id := range newIDs {
+			names = append(names, "@"+s.username(id))
+		}
+		fmt.Fprintf(os.Stderr, "Add %s to %s? This rotates the conversation key (visible to all members); new members read messages from now on only.\n", strings.Join(names, ", "), conversationID)
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return fmt.Errorf("refusing to add members non-interactively — pass --yes to confirm")
+		}
+		fmt.Fprint(os.Stderr, "Proceed? [y/N] ")
+		var answer string
+		_, _ = fmt.Scanln(&answer)
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			return fmt.Errorf("add-members aborted")
+		}
+	}
+
+	// The rotated key is wrapped to the full new roster (current + new).
+	roster := append(append([]string{}, current...), newIDs...)
+	inputs, err := s.latestKeyInputs(roster)
+	if err != nil {
+		return err
+	}
+	prepared, err := s.chat.PrepareGroupMembersChange(chatxdk.GroupMembersChangeParams{
+		PublicKeys:       inputs,
+		ConversationID:   api.ChatConversationEventID(conversationID),
+		NewMemberIDs:     newIDs,
+		CurrentMemberIDs: meta.MemberIDs,
+		CurrentAdminIDs:  meta.AdminIDs,
+		CurrentTitle:     meta.GroupName,
+		CurrentAvatarURL: meta.GroupAvatarURL,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to prepare member change: %w", err)
+	}
+
+	pub, err := s.chat.GetPublicKeys()
+	if err != nil {
+		return err
+	}
+	body := preparedChangeToRequest(prepared, pub.Signing)
+	body["user_ids"] = newIDs
+	if _, err := api.AddChatGroupMembers(s.client, conversationID, body, s.opts); err != nil {
+		return err
+	}
+	fmt.Printf("%s %d member(s) to %s\n", color.GreenString("✓ added"), len(newIDs), api.ChatConversationPathID(conversationID))
+	color.New(color.Faint).Printf("  new key version %s\n", prepared.ConversationKeyVersion)
+	return nil
+}
+
+// resolveUserToID resolves @username / username / bare id to a user id.
+func (s *chatSession) resolveUserToID(input string) (string, error) {
+	input = strings.TrimSpace(input)
+	if isAllDigits(input) {
+		return input, nil
+	}
+	return resolveUserID(s.client, input, s.opts)
+}
+
+// mediaTypeForMime maps a detected MIME type to the wire MediaType code.
+func mediaTypeForMime(mime string) int32 {
+	switch {
+	case mime == "image/gif":
+		return 2 // GIF
+	case mime == "image/svg+xml":
+		return 6 // SVG
+	case strings.HasPrefix(mime, "image/"):
+		return 1 // IMAGE
+	case strings.HasPrefix(mime, "video/"):
+		return 3 // VIDEO
+	case strings.HasPrefix(mime, "audio/"):
+		return 4 // AUDIO
+	default:
+		return 5 // FILE
+	}
+}
+
+// uploadMedia encrypts a local file under the conversation key, uploads the
+// ciphertext, and returns an attachment descriptor referencing it.
+func (s *chatSession) uploadMedia(conversationID, path string, conversationKey []byte) (*chatxdk.AttachmentDescriptor, error) {
+	plaintext, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not read %s: %w", path, err)
+	}
+	ciphertext, err := s.chat.EncryptStream(plaintext, conversationKey)
+	if err != nil {
+		return nil, fmt.Errorf("could not encrypt media: %w", err)
+	}
+	sessionID, mediaHashKey, err := api.InitializeChatMediaUpload(s.client, conversationID, len(ciphertext), s.opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := api.UploadChatMedia(s.client, sessionID, conversationID, mediaHashKey, ciphertext, s.opts); err != nil {
+		return nil, err
+	}
+
+	mime, _ := chatxdk.DetectMimeType(plaintext)
+	mediaType := mediaTypeForMime(mime)
+	att := &chatxdk.AttachmentDescriptor{
+		AttachmentType: "media",
+		MediaHashKey:   mediaHashKey,
+		FilesizeBytes:  int64(len(plaintext)),
+		Filename:       filepath.Base(path),
+		MediaType:      &mediaType,
+	}
+	if dim, err := chatxdk.DetectImageDimensions(plaintext); err == nil && dim != nil {
+		att.Width = int64(dim.Width)
+		att.Height = int64(dim.Height)
+	}
+	color.New(color.Faint).Fprintf(os.Stderr, "  uploaded %s (%s, %d bytes)\n", att.Filename, mime, len(plaintext))
+	return att, nil
 }
 
 // prepareOneToOneKey generates a conversation key for a 1:1 conversation,
@@ -1357,11 +1756,11 @@ func (s *chatSession) rotateConversationKey(conversationID string, skipConfirm b
 	// for a group, the two ids from the canonical id for a 1:1.
 	var roster []string
 	if strings.HasPrefix(conversationID, "g") {
-		ids, _, err := api.GetChatConversation(s.client, conversationID, s.opts)
+		meta, _, err := api.GetChatConversation(s.client, conversationID, s.opts)
 		if err != nil {
 			return fmt.Errorf("could not fetch the group roster: %w", err)
 		}
-		roster = ids
+		roster = meta.AllUserIDs()
 	} else {
 		roster = strings.Split(conversationID, "-")
 	}
