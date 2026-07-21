@@ -4,6 +4,8 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+## v1.3.0 - 2026-07-21
+
 ### Added
 
 - `xurl chat` — an end-to-end encrypted XChat client. Commands: `keys status|restore|import`, `conversations`, `read`, `send`, `listen`, `download`, `rotate`, `add-members`, `mark-read`, and `typing`. Encryption, decryption, and signing happen locally via the chat-xdk library; the server only sees ciphertext. `send` supports encrypted attachments (`--file`) and threaded replies (`--reply-to`); reading and sending mark the conversation read automatically. xurl never generates or registers keys — an account must already have XChat keys from another client, brought to this machine via Juicebox PIN recovery or an exported key blob, and stored in `~/.xurl/keys.yml` (mode 600). Requires a cgo build on macOS (amd64/arm64) or Linux (amd64); prebuilt release binaries ship a stub explaining how to build with chat enabled.
