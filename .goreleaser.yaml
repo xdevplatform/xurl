@@ -110,8 +110,10 @@ homebrew_casks:
     hooks:
       post:
         install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/xurl"]
+          on_macos do
+            postflight_steps do
+              run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{staged_path}}/xurl"]
+            end
           end
 
 release:
