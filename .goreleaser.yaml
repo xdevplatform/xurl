@@ -107,12 +107,17 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/xdevplatform/xurl"
     description: "Auth-enabled curl-like CLI for the X API"
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/xurl"]
-          end
+    # Homebrew 7.0 deprecated `postflight`. GoReleaser 2.18 still emits that
+    # stanza from hooks.post.install (goreleaser/goreleaser#6873). Until
+    # hooks.post.install_steps ships, emit postflight_steps via custom_block.
+    # {{ "{{staged_path}}" }} survives GoReleaser's template pass as Homebrew's
+    # install-time {{staged_path}} token.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/xurl"]
+        end
+      end
 
 release:
   footer: >-
