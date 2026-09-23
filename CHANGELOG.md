@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Fixed
+
+- Homebrew no longer prints a "Calling `postflight` is deprecated" warning when loading the `xurl` cask. The cask now uses `postflight_steps` for the same macOS quarantine cleanup.
+
 ## v1.3.1 - 2026-07-21
 
 ### Changed
