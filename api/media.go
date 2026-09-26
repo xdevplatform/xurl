@@ -354,12 +354,13 @@ func (m *MediaUploader) WaitForProcessing() (json.RawMessage, error) {
 		}
 
 		state := statusResponse.Data.ProcessingInfo.State
-		if state == "succeeded" {
+		switch state {
+case "succeeded":
 			if m.verbose {
 				fmt.Printf("\033[32mMedia processing complete!\033[0m\n")
 			}
 			return response, nil
-		} else if state == "failed" {
+		case "failed":
 			return nil, fmt.Errorf("media processing failed")
 		}
 
