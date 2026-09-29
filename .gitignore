@@ -6,3 +6,6 @@ __pycache__/
 
 # Added by goreleaser init:
 dist/
+
+# Zig cache that setup-zig restores into the checkout; GoReleaser refuses a dirty tree.
+.zig-cache/
