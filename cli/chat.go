@@ -1636,13 +1636,15 @@ func (s *chatSession) addGroupMembers(conversationID string, newMembers []string
 		return err
 	}
 	prepared, err := s.chat.PrepareGroupMembersChange(chatxdk.GroupMembersChangeParams{
-		PublicKeys:       inputs,
-		ConversationID:   api.ChatConversationEventID(conversationID),
-		NewMemberIDs:     newIDs,
-		CurrentMemberIDs: meta.MemberIDs,
-		CurrentAdminIDs:  meta.AdminIDs,
-		CurrentTitle:     meta.GroupName,
-		CurrentAvatarURL: meta.GroupAvatarURL,
+		PublicKeys:                          inputs,
+		ConversationID:                      api.ChatConversationEventID(conversationID),
+		NewMemberIDs:                        newIDs,
+		CurrentMemberIDs:                    meta.MemberIDs,
+		CurrentAdminIDs:                     meta.AdminIDs,
+		CurrentTitle:                        meta.GroupName,
+		CurrentAvatarURL:                    meta.GroupAvatarURL,
+		CurrentTTLMsec:                      meta.MessageTTLMs,
+		CurrentScreenCaptureBlockingEnabled: meta.ScreenCaptureBlockingEnabled,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to prepare member change: %w", err)
