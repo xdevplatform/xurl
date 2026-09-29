@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Fixed
+
+- Release binaries, the Homebrew cask, and the npm package now include the v1.3.3 `xurl chat add-members` fix. The v1.3.3 release stopped before publishing them because a restored Zig build cache left the checkout dirty; that cache directory is now ignored.
+
 ## v1.3.3 - 2026-09-29
 
 ### Fixed
