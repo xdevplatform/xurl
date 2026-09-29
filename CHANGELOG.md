@@ -4,6 +4,8 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+## v1.3.3 - 2026-09-29
+
 ### Fixed
 
 - `xurl chat add-members` no longer fails with "Invalid action signature" on a group whose message timer (`message_ttl_ms`) or screen-capture blocking setting (`screen_capture_blocking_enabled`) has been set. The signed group state left both out; it now carries the values from the conversation.
