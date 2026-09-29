@@ -152,6 +152,75 @@ func TestPreparedChangeToRequestShape(t *testing.T) {
 	assert.False(t, has)
 }
 
+// addMembersStubClient serves the requests addGroupMembers makes and records
+// the body it posts.
+type addMembersStubClient struct {
+	api.Client
+	conversation string
+	publicKey    string
+	posted       string
+}
+
+func (c *addMembersStubClient) SendRequest(opts api.RequestOptions) (json.RawMessage, error) {
+	switch {
+	case opts.Method == "GET" && opts.Endpoint == "/2/chat/conversations/g100":
+		return json.RawMessage(c.conversation), nil
+	case opts.Method == "GET" && strings.HasSuffix(opts.Endpoint, "/public_keys"):
+		return json.RawMessage(fmt.Sprintf(`{"data":[{"public_key_version":"1","public_key":%q}]}`, c.publicKey)), nil
+	case opts.Method == "POST" && opts.Endpoint == "/2/chat/conversations/g100/members":
+		c.posted = opts.Data
+		return json.RawMessage(`{"data":{}}`), nil
+	}
+	return nil, fmt.Errorf("unexpected request %s %s", opts.Method, opts.Endpoint)
+}
+
+func TestAddGroupMembersSignsGroupSettings(t *testing.T) {
+	// The member-add signature covers the group's current settings. Its signed
+	// payload ends with {message_ttl_ms|null},{conversation key version},
+	// {screen_capture_blocking_enabled|null}, and must match the conversation.
+	tests := []struct {
+		name     string
+		settings string
+		want     string
+	}{
+		{"settings never set", ``, "null,%s,null"},
+		{"timer on, screen capture off", `,"message_ttl_ms":86400000,"screen_capture_blocking_enabled":false`, "86400000,%s,false"},
+		{"screen capture on", `,"screen_capture_blocking_enabled":true`, "null,%s,true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chat := chatxdk.New()
+			defer chat.Close()
+			keys, err := chat.GenerateKeypairs()
+			require.NoError(t, err)
+			require.NoError(t, chat.SetIdentity("42", "1"))
+
+			client := &addMembersStubClient{
+				conversation: `{"data":{"id":"g100","type":"group","member_ids":["42","7"],"admin_ids":["42"]` + tt.settings + `}}`,
+				publicKey:    keys.PublicKey.PublicKey,
+			}
+			s := &chatSession{chat: chat, client: client, userID: "42", usernames: map[string]string{}}
+			require.NoError(t, s.addGroupMembers("g100", []string{"300"}, true))
+
+			var body struct {
+				ConversationKeyVersion string `json:"conversation_key_version"`
+				ActionSignatures       []struct {
+					SignaturePayload string `json:"signature_payload"`
+				} `json:"action_signatures"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(client.posted), &body))
+			var memberAdd string
+			for _, sig := range body.ActionSignatures {
+				if strings.HasPrefix(sig.SignaturePayload, "GroupChangeEvent.GroupMemberAddChange,") {
+					memberAdd = sig.SignaturePayload
+				}
+			}
+			require.NotEmpty(t, memberAdd, "no member-add signature in the request")
+			assert.True(t, strings.HasSuffix(memberAdd, ","+fmt.Sprintf(tt.want, body.ConversationKeyVersion)), memberAdd)
+		})
+	}
+}
+
 func TestChatConversationPathHelpers(t *testing.T) {
 	assert.Equal(t, "1-2", api.ChatConversationPathID("1:2"))
 	assert.Equal(t, "1:2", api.ChatConversationEventID("1-2"))
