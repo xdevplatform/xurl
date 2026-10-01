@@ -14,6 +14,7 @@ const (
 	ErrTypeJSON          = "JSON Error"
 	ErrTypeAuth          = "Auth Error"
 	ErrTypeTokenStore    = "Token Store Error"
+	ErrTypeYAML          = "YAML Error"
 )
 
 type Error struct {
@@ -74,6 +75,10 @@ func NewJSONError(cause error) *Error {
 	return NewError(ErrTypeJSON, cause.Error(), cause)
 }
 
+func NewYAMLError(cause error) *Error {
+	return NewError(ErrTypeYAML, cause.Error(), cause)
+}
+
 func NewAuthError(message string, cause error) *Error {
 	return NewError(ErrTypeAuth, message, cause)
 }
@@ -95,3 +100,4 @@ func IsIOError(err error) bool   { return IsErrorType(err, ErrTypeIO) }
 func IsAPIError(err error) bool  { return IsErrorType(err, ErrTypeAPI) }
 func IsJSONError(err error) bool { return IsErrorType(err, ErrTypeJSON) }
 func IsAuthError(err error) bool { return IsErrorType(err, ErrTypeAuth) }
+func IsYAMLError(err error) bool { return IsErrorType(err, ErrTypeYAML) }
