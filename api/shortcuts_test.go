@@ -88,8 +88,14 @@ func setupShortcutServer() *httptest.Server {
 
 		// GET /2/tweets/:id — read post
 		case strings.HasPrefix(r.URL.Path, "/2/tweets/") && r.Method == "GET":
+			fields := r.URL.Query().Get("tweet.fields")
+			if !strings.Contains(fields, "note_tweet") || !strings.Contains(fields, "article") {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"errors":[{"message":"missing long-form tweet fields"}]}`))
+				return
+			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":{"id":"123","text":"existing post","public_metrics":{"like_count":5}}}`))
+			w.Write([]byte(`{"data":{"id":"123","text":"existing post","note_tweet":{"text":"full long-form post"},"public_metrics":{"like_count":5}}}`))
 
 		// GET /2/users/me
 		case r.URL.Path == "/2/users/me" && r.Method == "GET":
@@ -216,12 +222,16 @@ func TestReadPost(t *testing.T) {
 
 	var result struct {
 		Data struct {
-			ID   string `json:"id"`
-			Text string `json:"text"`
+			ID        string `json:"id"`
+			Text      string `json:"text"`
+			NoteTweet struct {
+				Text string `json:"text"`
+			} `json:"note_tweet"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(resp, &result))
 	assert.Equal(t, "123", result.Data.ID)
+	assert.Equal(t, "full long-form post", result.Data.NoteTweet.Text)
 }
 
 // ---- SearchPosts ----
