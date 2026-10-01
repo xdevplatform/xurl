@@ -113,6 +113,52 @@ func TestGetChatPublicKeys(t *testing.T) {
 	assert.Empty(t, requests[0].URL.RawQuery)
 }
 
+func TestGetChatUsersPublicKeysUsesPerUserRoutes(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/2/users/7/public_keys":
+			_, _ = w.Write([]byte(`{"data":[{"public_key_version":"1700","public_key":"idpk7","signing_public_key":"sigpk7","identity_public_key_signature":"binding7"}]}`))
+		case "/2/users/8/public_keys":
+			_, _ = w.Write([]byte(`{"data":[{"public_key_version":"1800","public_key":"idpk8","signing_public_key":"sigpk8","identity_public_key_signature":"binding8"}]}`))
+		default:
+			http.Error(w, `{"error":"unexpected route"}`, http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := chatTestClient(t, server)
+
+	keys, err := GetChatUsersPublicKeys(client, []string{"7", "8"}, RequestOptions{})
+	require.NoError(t, err)
+	require.Len(t, keys, 2)
+	assert.Equal(t, []string{"/2/users/7/public_keys", "/2/users/8/public_keys"}, paths)
+	assert.Equal(t, "7", keys[0].UserID)
+	assert.Equal(t, "1700", keys[0].Version)
+	assert.Equal(t, "8", keys[1].UserID)
+	assert.Equal(t, "1800", keys[1].Version)
+}
+
+func TestGetChatUsersPublicKeysIdentifiesFailedUserAndReturnsNoPartialKeys(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/2/users/7/public_keys" {
+			_, _ = w.Write([]byte(`{"data":[{"public_key_version":"1700","public_key":"idpk7","signing_public_key":"sigpk7","identity_public_key_signature":"binding7"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"denied"}`))
+	}))
+	defer server.Close()
+	client := chatTestClient(t, server)
+
+	keys, err := GetChatUsersPublicKeys(client, []string{"7", "8"}, RequestOptions{})
+	require.Error(t, err)
+	assert.Nil(t, keys)
+	assert.Contains(t, err.Error(), "user 8")
+}
+
 func TestGetChatEvents(t *testing.T) {
 	var requests []*http.Request
 	var bodies []string
