@@ -1,10 +1,10 @@
 .PHONY: build
 build:
-	go build -o xurl
+	go build -o xurl ./cmd/xurl
 
 .PHONY: install
 install:
-	go install
+	go install ./cmd/xurl
 
 .PHONY: clean
 clean:
