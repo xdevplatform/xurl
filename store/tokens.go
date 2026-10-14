@@ -621,6 +621,38 @@ func (s *TokenStore) HasBearerToken() bool {
 // ─── Persistence ────────────────────────────────────────────────────
 
 // Saves the token store to ~/.xurl in YAML format.
+// Reload replaces the cached store only after a complete valid read.
+func (s *TokenStore) Reload() error {
+	data, err := os.ReadFile(s.FilePath)
+	if os.IsNotExist(err) {
+		// Do not resurrect a grant removed from disk using a stale process snapshot.
+		s.Apps = make(map[string]*App)
+		s.DefaultApp = ""
+		return nil
+	}
+	if err != nil {
+		return errors.NewIOError(err)
+	}
+	var sf storeFile
+	if err = yaml.Unmarshal(data, &sf); err != nil {
+		return errors.NewJSONError(err)
+	}
+	if len(sf.Apps) == 0 {
+		return errors.NewError(errors.ErrTypeTokenStore, "empty token store", nil)
+	}
+	for _, app := range sf.Apps {
+		if app == nil {
+			return errors.NewError(errors.ErrTypeTokenStore, "invalid app record", nil)
+		}
+		if app.OAuth2Tokens == nil {
+			app.OAuth2Tokens = make(map[string]Token)
+		}
+	}
+	s.Apps = sf.Apps
+	s.DefaultApp = sf.DefaultApp
+	return nil
+}
+
 func (s *TokenStore) saveToFile() error {
 	sf := storeFile{
 		Apps:       s.Apps,
@@ -631,10 +663,25 @@ func (s *TokenStore) saveToFile() error {
 		return errors.NewJSONError(err)
 	}
 
-	err = os.WriteFile(s.FilePath, data, 0600)
+	// Readers see either complete version, never a truncated YAML file.
+	f, err := os.CreateTemp(filepath.Dir(s.FilePath), ".xurl-auth-*")
 	if err != nil {
 		return errors.NewIOError(err)
 	}
-
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err != nil {
+		_ = f.Close()
+		return errors.NewIOError(err)
+	}
+	if err = f.Sync(); err != nil {
+		_ = f.Close()
+		return errors.NewIOError(err)
+	}
+	if err = f.Close(); err != nil {
+		return errors.NewIOError(err)
+	}
+	if err = os.Rename(f.Name(), s.FilePath); err != nil {
+		return errors.NewIOError(err)
+	}
 	return nil
 }
