@@ -620,7 +620,6 @@ func (s *TokenStore) HasBearerToken() bool {
 
 // ─── Persistence ────────────────────────────────────────────────────
 
-// Saves the token store to ~/.xurl in YAML format.
 // Reload replaces the cached store only after a complete valid read.
 func (s *TokenStore) Reload() error {
 	data, err := os.ReadFile(s.FilePath)
@@ -638,7 +637,9 @@ func (s *TokenStore) Reload() error {
 		return errors.NewJSONError(err)
 	}
 	if len(sf.Apps) == 0 {
-		return errors.NewError(errors.ErrTypeTokenStore, "empty token store", nil)
+		// Removing the last app is a valid empty state, not a malformed store.
+		sf.Apps = make(map[string]*App)
+		sf.DefaultApp = ""
 	}
 	for _, app := range sf.Apps {
 		if app == nil {

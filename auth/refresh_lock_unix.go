@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || dragonfly || freebsd || netbsd || openbsd
 
 package auth
 

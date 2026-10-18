@@ -436,6 +436,10 @@ func (a *Auth) ForceRefreshOAuth2Token(username string) (string, error) {
 func (a *Auth) refreshOAuth2Token(username string, force bool) (string, error) {
 	// Lock the grant across processes, then reload: a sibling bridge may have
 	// rotated it after this process started. Keep the lock through persistence.
+	// Deliberately lock and reload even for a locally valid token: a removed or
+	// replaced grant must take effect on the next request. This can delay a valid
+	// reader behind a sibling's refresh; an mtime-only fast path could miss a
+	// replacement on filesystems with coarse timestamp resolution.
 	_, previous := a.getOAuth2TokenRecord(username)
 	previousAccess := ""
 	if previous != nil && previous.OAuth2 != nil {

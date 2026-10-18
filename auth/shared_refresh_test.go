@@ -122,3 +122,26 @@ func TestRefreshDoesNotResurrectRemovedGrant(t *testing.T) {
 	_, err = os.Stat(ts.FilePath)
 	require.True(t, os.IsNotExist(err))
 }
+
+// A long-lived bridge must observe removal of the last app as a missing grant,
+// not a corrupt store, without restoring its previously cached credentials.
+func TestRefreshAfterLastAppRemoved(t *testing.T) {
+	ts, dir := createTempTokenStore(t)
+	defer os.RemoveAll(dir)
+	future := uint64(time.Now().Add(time.Hour).Unix())
+	require.NoError(t, ts.SaveOAuth2TokenForApp("default", "alice", "cached-access", "cached-refresh", future))
+	a := &Auth{TokenStore: ts, tokenURL: "http://127.0.0.1:1"}
+	data, err := os.ReadFile(ts.FilePath)
+	require.NoError(t, err)
+	sibling := &store.TokenStore{}
+	require.NoError(t, yaml.Unmarshal(data, sibling))
+	sibling.FilePath = ts.FilePath
+	require.NoError(t, sibling.RemoveApp("default"))
+	empty, err := os.ReadFile(ts.FilePath)
+	require.NoError(t, err)
+	_, err = a.GetValidOAuth2Token("alice")
+	require.ErrorContains(t, err, "TokenNotFound")
+	after, err := os.ReadFile(ts.FilePath)
+	require.NoError(t, err)
+	require.Equal(t, empty, after, "reader must not restore the removed app")
+}
