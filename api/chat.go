@@ -91,30 +91,22 @@ func GetChatPublicKeys(client Client, userID string, opts RequestOptions) ([]Cha
 }
 
 // GetChatUsersPublicKeys fetches registered public keys for the given users;
-// each returned row carries its owner's user_id. The endpoint accepts at
-// most 100 ids per request, so larger inputs are fetched in batches.
+// each returned row carries its owner's user_id. Public keys are fetched via
+// the per-user route because the batch route is not enabled for every X app.
 func GetChatUsersPublicKeys(client Client, userIDs []string, opts RequestOptions) ([]ChatPublicKey, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
 	var keys []ChatPublicKey
-	for start := 0; start < len(userIDs); start += 100 {
-		batch := userIDs[start:min(start+100, len(userIDs))]
-		opts.Method = "GET"
-		opts.Endpoint = "/2/users/public_keys?ids=" + url.QueryEscape(strings.Join(batch, ","))
-		opts.Data = ""
-
-		resp, err := client.SendRequest(opts)
+	for _, userID := range userIDs {
+		userKeys, err := GetChatPublicKeys(client, userID, opts)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to fetch public keys for user %s: %w", userID, err)
 		}
-		var out struct {
-			Data []ChatPublicKey `json:"data"`
+		for i := range userKeys {
+			userKeys[i].UserID = userID
 		}
-		if err := json.Unmarshal(resp, &out); err != nil {
-			return nil, fmt.Errorf("failed to parse public keys response: %w", err)
-		}
-		keys = append(keys, out.Data...)
+		keys = append(keys, userKeys...)
 	}
 	return keys, nil
 }
