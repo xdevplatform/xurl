@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/xdevplatform/xurl/auth"
 
@@ -27,6 +29,23 @@ var webhookPort int
 var outputFileName string // To store the output file name from the flag
 var quietMode bool        // To store the quiet flag state
 var prettyMode bool       // To store the pretty-print flag state
+var ngrokConnectTimeout time.Duration
+
+// ngrokAuthtokenEnv is the variable the ngrok SDK reads an authtoken from.
+const ngrokAuthtokenEnv = "NGROK_AUTHTOKEN"
+
+// resolveNgrokAuthtoken picks the ngrok authtoken to use: what was typed at the prompt, or else the
+// environment variable. An empty result is an error, because the ngrok SDK retries an empty token
+// forever without surfacing the authentication failure, and the command would hang.
+func resolveNgrokAuthtoken(input string, lookupEnv func(string) (string, bool)) (string, error) {
+	if token := strings.TrimSpace(input); token != "" {
+		return token, nil
+	}
+	if token, ok := lookupEnv(ngrokAuthtokenEnv); ok && strings.TrimSpace(token) != "" {
+		return strings.TrimSpace(token), nil
+	}
+	return "", fmt.Errorf("no ngrok authtoken: enter one at the prompt or set %s (get it from https://dashboard.ngrok.com/get-started/your-authtoken)", ngrokAuthtokenEnv)
+}
 
 // CreateWebhookCommand creates the webhook command and its subcommands.
 func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
@@ -69,18 +88,40 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 			}
 
 			// Prompt for ngrok authtoken
-			color.Yellow("Enter your ngrok authtoken (leave empty to try NGROK_AUTHTOKEN env var): ")
+			color.Yellow("Enter your ngrok authtoken (leave empty to use the %s env var): ", ngrokAuthtokenEnv)
 			reader := bufio.NewReader(os.Stdin)
-			ngrokAuthToken, _ := reader.ReadString('\n')
-			ngrokAuthToken = strings.TrimSpace(ngrokAuthToken)
+			input, err := reader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				color.Red("Error reading the ngrok authtoken: %v", err)
+				os.Exit(1)
+			}
+			ngrokAuthToken, err := resolveNgrokAuthtoken(input, os.LookupEnv)
+			if err != nil {
+				color.Red("Error: %v", err)
+				os.Exit(1)
+			}
+			if strings.TrimSpace(input) == "" {
+				color.Cyan("Using the ngrok authtoken from %s.", ngrokAuthtokenEnv)
+			}
 
-			ctx := context.Background()
-			var tunnelOpts []ngrok.ConnectOption
-			if ngrokAuthToken != "" {
-				tunnelOpts = append(tunnelOpts, ngrok.WithAuthtoken(ngrokAuthToken))
-			} else {
-				color.Cyan("Attempting to use NGROK_AUTHTOKEN environment variable for ngrok authentication.")
-				tunnelOpts = append(tunnelOpts, ngrok.WithAuthtokenFromEnv()) // Fallback to env
+			// The context outlives the connection so the session can reconnect later; the timer only
+			// cancels it if the tunnel is not up in time, which turns an endless retry into an error.
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			connectTimer := time.AfterFunc(ngrokConnectTimeout, cancel)
+			var lastConnectErr error
+			tunnelOpts := []ngrok.ConnectOption{
+				ngrok.WithAuthtoken(ngrokAuthToken),
+				// The SDK retries most failures, an invalid authtoken among them, without reporting
+				// them. The handler prints each one so a failing connection is never silent.
+				ngrok.WithDisconnectHandler(func(ctx context.Context, sess ngrok.Session, err error) {
+					// The cancellation itself arrives here too, after the real failures.
+					if err == nil || errors.Is(err, context.Canceled) {
+						return
+					}
+					lastConnectErr = err
+					color.Red("ngrok: %v", err)
+				}),
 			}
 
 			forwardToAddr := fmt.Sprintf("localhost:%d", webhookPort)
@@ -92,8 +133,13 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 				),
 				tunnelOpts...,
 			)
+			connectTimer.Stop()
 			if err != nil {
-				color.Red("Error starting ngrok tunnel: %v", err)
+				if ctx.Err() != nil && lastConnectErr != nil {
+					color.Red("Error starting ngrok tunnel: not connected after %s; the last error was: %v", ngrokConnectTimeout, lastConnectErr)
+				} else {
+					color.Red("Error starting ngrok tunnel: %v", err)
+				}
 				os.Exit(1)
 			}
 			defer ngrokListener.Close()
@@ -189,6 +235,7 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 	webhookStartCmd.Flags().StringVarP(&outputFileName, "output", "o", "", "File to write incoming POST request bodies to")
 	webhookStartCmd.Flags().BoolVarP(&quietMode, "quiet", "q", false, "Enable quiet mode (logs only that a POST event was received, not the full body to console)")
 	webhookStartCmd.Flags().BoolVarP(&prettyMode, "pretty", "P", false, "Pretty-print JSON POST bodies in console output (ignored if -q is used)")
+	webhookStartCmd.Flags().DurationVar(&ngrokConnectTimeout, "connect-timeout", 30*time.Second, "Give up if the ngrok tunnel is not established within this time")
 
 	webhookCmd.AddCommand(webhookStartCmd)
 	return webhookCmd
