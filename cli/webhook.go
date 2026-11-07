@@ -39,21 +39,15 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 	webhookStartCmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start a local webhook server with an ngrok tunnel",
-		Long:  `Starts a local HTTP server and an ngrok tunnel to listen for X API webhook events, including CRC checks. POST request bodies can be saved to a file using the -o flag. Use -q for quieter console logging of POST events. Use -P to pretty-print JSON POST bodies in the console.`,
+		Long:  `Starts a local HTTP server and an ngrok tunnel to listen for X API webhook events, including CRC checks. CRC checks use the selected app's OAuth 2.0 client secret, or its OAuth 1.0a consumer secret for legacy integrations. POST request bodies can be saved to a file using the -o flag. Use -q for quieter console logging of POST events. Use -P to pretty-print JSON POST bodies in the console.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			color.Cyan("Starting webhook server with ngrok...")
 
-			if authInstance == nil || authInstance.TokenStore == nil {
-				color.Red("Error: Authentication module not initialized properly.")
+			signingSecret, err := webhookSigningSecret(authInstance)
+			if err != nil {
+				color.Red("Error: %v", err)
 				os.Exit(1)
 			}
-
-			oauth1Token := authInstance.TokenStore.GetOAuth1TokensForApp(authInstance.AppName())
-			if oauth1Token == nil || oauth1Token.OAuth1 == nil || oauth1Token.OAuth1.ConsumerSecret == "" {
-				color.Red("Error: OAuth 1.0a consumer secret not found. Please configure OAuth 1.0a credentials using 'xurl auth oauth1'.")
-				os.Exit(1)
-			}
-			consumerSecret := oauth1Token.OAuth1.ConsumerSecret
 
 			// Handle output file if -o flag is used
 			var outputFile *os.File
@@ -105,26 +99,7 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 			mux := http.NewServeMux()
 			mux.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
-					crcToken := r.URL.Query().Get("crc_token")
-					if crcToken == "" {
-						http.Error(w, "Error: crc_token missing from request", http.StatusBadRequest)
-						log.Printf("[WARN] Received GET /webhook without crc_token")
-						return
-					}
-					log.Printf("[INFO] Received GET %s%s with crc_token: %s", color.BlueString(r.Host), color.BlueString(r.URL.Path), color.YellowString(crcToken))
-
-					mac := hmac.New(sha256.New, []byte(consumerSecret))
-					mac.Write([]byte(crcToken))
-					hashedToken := mac.Sum(nil)
-					encodedToken := base64.StdEncoding.EncodeToString(hashedToken)
-
-					response := map[string]string{
-						"response_token": "sha256=" + encodedToken,
-					}
-					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(response)
-					log.Printf("[INFO] Responded to CRC check with token: %s", color.GreenString(response["response_token"]))
-
+					handleWebhookCRC(w, r, signingSecret)
 				} else if r.Method == http.MethodPost {
 					bodyBytes, err := io.ReadAll(r.Body)
 					if err != nil {
@@ -192,4 +167,45 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 
 	webhookCmd.AddCommand(webhookStartCmd)
 	return webhookCmd
+}
+
+func webhookSigningSecret(a *auth.Auth) (string, error) {
+	if a == nil || a.TokenStore == nil {
+		return "", fmt.Errorf("authentication module not initialized properly")
+	}
+	appName := a.TokenStore.GetActiveAppName(a.AppName())
+	// Resolve only the selected app: ResolveApp would fall back to the default
+	// app for an unknown name, potentially signing with another app's secret.
+	app := a.TokenStore.GetApp(appName)
+	if app != nil {
+		if app.ClientSecret != "" {
+			return app.ClientSecret, nil
+		}
+		if token := app.OAuth1Token; token != nil && token.OAuth1 != nil && token.OAuth1.ConsumerSecret != "" {
+			return token.OAuth1.ConsumerSecret, nil
+		}
+	}
+	return "", fmt.Errorf("webhook signing secret not found for app %q: configure an OAuth 2.0 client secret with 'xurl auth apps add' or 'xurl auth apps update', or an OAuth 1.0a consumer secret for legacy integrations", appName)
+}
+
+func handleWebhookCRC(w http.ResponseWriter, r *http.Request, signingSecret string) {
+	crcToken := r.URL.Query().Get("crc_token")
+	if crcToken == "" {
+		http.Error(w, "Error: crc_token missing from request", http.StatusBadRequest)
+		log.Printf("[WARN] Received GET /webhook without crc_token")
+		return
+	}
+	log.Printf("[INFO] Received GET %s%s with crc_token: %s", color.BlueString(r.Host), color.BlueString(r.URL.Path), color.YellowString(crcToken))
+
+	mac := hmac.New(sha256.New, []byte(signingSecret))
+	mac.Write([]byte(crcToken))
+	hashedToken := mac.Sum(nil)
+	encodedToken := base64.StdEncoding.EncodeToString(hashedToken)
+
+	response := map[string]string{
+		"response_token": "sha256=" + encodedToken,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+	log.Printf("[INFO] Responded to CRC check with token: %s", color.GreenString(response["response_token"]))
 }
