@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Fixed
+
+- Stopping the npm `xurl` command now stops the xurl binary too. The npm wrapper started the binary without passing on termination signals, so when a process supervisor or MCP host stopped it (for example to restart `xurl mcp`), the binary kept running detached with the host's input and output still open. The wrapper now forwards SIGINT, SIGTERM, SIGHUP and SIGQUIT and exits with the binary's exit code or signal.
+
 ## v1.3.4 - 2026-09-29
 
 ### Fixed
