@@ -69,10 +69,10 @@ xurl auth apps add dev-app  --client-id DEV_ID  --client-secret DEV_SECRET
 > `REDIRECT_URI` now resolves in this order: `REDIRECT_URI` environment variable, then the app's stored `redirect_uri` in `~/.xurl/auth.yml`, then the built-in default `http://localhost:8080/callback`.
 
 #### OAuth 2.0 User-Context
-**Note:** For OAuth 2.0 authentication, you must specify the redirect URI in the [X API developer portal](https://developer.x.com/en/portal/dashboard).
+**Note:** For OAuth 2.0 authentication, you must specify the redirect URI in the [X Developer Console](https://console.x.com).
 
-1. Create an app at the [X API developer portal](https://developer.x.com/en/portal/dashboard).
-2. Go to authentication settings and set the redirect URI to the same value that `xurl` will use through `REDIRECT_URI`.
+1. Create an app in the [X Developer Console](https://console.x.com).
+2. In the console, go to `Apps`, open your app, and on the `Keys & Tokens` tab click `Set up` next to `User authentication settings`. If the app is already set up, use the `Settings` button on the app page. Under `App info`, set `Callback URI / Redirect URL` to the same value that `xurl` will use through `REDIRECT_URI`.
    The default is `http://localhost:8080/callback`, and `xurl` derives the callback host, port, and path from the effective redirect URI. The effective value is resolved from `REDIRECT_URI`, then the app's stored `redirect_uri`, then the built-in default. When you use `localhost`, `xurl` listens on both `127.0.0.1` and `::1` so browser loopback resolution does not break the callback.
 ![Setup](./assets/setup.png)
 ![Redirect URI](./assets/callback.png)
