@@ -434,6 +434,30 @@ func (a *Auth) ForceRefreshOAuth2Token(username string) (string, error) {
 }
 
 func (a *Auth) refreshOAuth2Token(username string, force bool) (string, error) {
+	// Lock the grant across processes, then reload: a sibling bridge may have
+	// rotated it after this process started. Keep the lock through persistence.
+	// Deliberately lock and reload even for a locally valid token: a removed or
+	// replaced grant must take effect on the next request. This can delay a valid
+	// reader behind a sibling's refresh; an mtime-only fast path could miss a
+	// replacement on filesystems with coarse timestamp resolution.
+	_, previous := a.getOAuth2TokenRecord(username)
+	previousAccess := ""
+	if previous != nil && previous.OAuth2 != nil {
+		previousAccess = previous.OAuth2.AccessToken
+	}
+	unlock, err := lockRefreshStore(a.TokenStore.FilePath)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if err := a.TokenStore.Reload(); err != nil {
+		return "", err
+	}
+	_, current := a.getOAuth2TokenRecord(username)
+	if force && current != nil && current.OAuth2 != nil && current.OAuth2.AccessToken != previousAccess {
+		force = false // A sibling already replaced the rejected token.
+	}
+
 	storedUsername, token := a.getOAuth2TokenRecord(username)
 	if token == nil || token.OAuth2 == nil {
 		return "", xurlErrors.NewAuthError("TokenNotFound", errors.New("oauth2 token not found"))
@@ -457,7 +481,9 @@ func (a *Auth) refreshOAuth2Token(username string, force bool) (string, error) {
 		},
 	}
 
-	tokenSource := config.TokenSource(context.Background(), &oauth2.Token{
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	tokenSource := config.TokenSource(ctx, &oauth2.Token{
 		RefreshToken: token.OAuth2.RefreshToken,
 	})
 

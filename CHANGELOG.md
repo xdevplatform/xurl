@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Fixed
+- OAuth2 refreshes sharing a token store now lock across processes and reload the latest grant before refreshing. This prevents independent MCP clients from redeeming the same stale refresh token. Token-store writes replace the file atomically, and a forced refresh reuses a token another process already replaced.
+- If an earlier refresh race has already invalidated the stored refresh token, reauthenticate once after upgrading. The fix cannot restore an invalidated grant.
+
 ## v1.3.4 - 2026-09-29
 
 ### Fixed
