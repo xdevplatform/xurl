@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Added
+
+- `xurl webhook start` answers CRC challenges using the selected app's OAuth2 client secret when available, with OAuth1 consumer-secret fallback for legacy integrations. Missing signing credentials now report both supported options.
+
 ## v1.3.4 - 2026-09-29
 
 ### Fixed

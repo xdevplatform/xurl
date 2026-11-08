@@ -310,12 +310,26 @@ All diagnostics are written to stderr so stdout stays a clean JSON-RPC channel.
 
 `xurl` can help you quickly set up a temporary webhook URL to receive events from the X API. This is useful for development and testing.
 
+CRC checks use the selected app's stored **OAuth 2.0 client secret** (recommended), falling back to its **OAuth 1.0a consumer secret** for legacy integrations. Bearer tokens and user access tokens are not CRC signing secrets. An OAuth2-only app does not need OAuth1 credentials or user authorization to answer CRC challenges.
+
+Register your app's OAuth2 credentials before starting the receiver:
+
+```bash
+xurl auth apps add my-app --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET
+# For an already registered app:
+xurl auth apps update my-app --client-secret YOUR_CLIENT_SECRET
+```
+
+Use `--app my-app` to select that app; otherwise, the configured default app is used. See the [X webhook CRC instructions](https://docs.x.com/x-api/webhooks/quickstart#how-to-build-the-crc-response) for details.
+
 1.  **Start the local webhook server with ngrok:**
 
     Run the `webhook start` command. This will start a local server and use ngrok to create a public URL that forwards to your local server. You will be prompted for your ngrok authtoken if it's not already configured via the `NGROK_AUTHTOKEN` environment variable.
 
     ```bash
     xurl webhook start
+    # Or select a registered app explicitly
+    xurl --app my-app webhook start
     # Or with a specific port and output file for POST bodies
     xurl webhook start -p 8081 -o webhook_events.log
     ```
