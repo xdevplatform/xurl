@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -69,19 +70,14 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 			}
 
 			// Prompt for ngrok authtoken
-			color.Yellow("Enter your ngrok authtoken (leave empty to try NGROK_AUTHTOKEN env var): ")
-			reader := bufio.NewReader(os.Stdin)
-			ngrokAuthToken, _ := reader.ReadString('\n')
-			ngrokAuthToken = strings.TrimSpace(ngrokAuthToken)
+			token, err := resolveNgrokAuthtoken(bufio.NewReader(os.Stdin))
+			if err != nil {
+				color.Red("Error: %v", err)
+				os.Exit(1)
+			}
 
 			ctx := context.Background()
-			var tunnelOpts []ngrok.ConnectOption
-			if ngrokAuthToken != "" {
-				tunnelOpts = append(tunnelOpts, ngrok.WithAuthtoken(ngrokAuthToken))
-			} else {
-				color.Cyan("Attempting to use NGROK_AUTHTOKEN environment variable for ngrok authentication.")
-				tunnelOpts = append(tunnelOpts, ngrok.WithAuthtokenFromEnv()) // Fallback to env
-			}
+			tunnelOpts := []ngrok.ConnectOption{ngrok.WithAuthtoken(token)}
 
 			forwardToAddr := fmt.Sprintf("localhost:%d", webhookPort)
 			color.Cyan("Configuring ngrok to forward to local port: %s", color.MagentaString("%d", webhookPort))
@@ -192,4 +188,26 @@ func CreateWebhookCommand(authInstance *auth.Auth) *cobra.Command {
 
 	webhookCmd.AddCommand(webhookStartCmd)
 	return webhookCmd
+}
+
+// resolveNgrokAuthtoken prompts for an ngrok authtoken and falls back to NGROK_AUTHTOKEN.
+func resolveNgrokAuthtoken(reader *bufio.Reader) (string, error) {
+	color.Yellow("Enter your ngrok authtoken (leave empty to try NGROK_AUTHTOKEN env var): ")
+	var enteredToken string
+	if reader != nil {
+		enteredToken, _ = reader.ReadString('\n')
+	}
+	return selectNgrokAuthtoken(enteredToken, os.Getenv("NGROK_AUTHTOKEN"))
+}
+
+// selectNgrokAuthtoken selects between the prompted token and the environment token, returning an error if both are empty.
+func selectNgrokAuthtoken(promptToken, envToken string) (string, error) {
+	if token := strings.TrimSpace(promptToken); token != "" {
+		return token, nil
+	}
+	if token := strings.TrimSpace(envToken); token != "" {
+		color.Cyan("Attempting to use NGROK_AUTHTOKEN environment variable for ngrok authentication.")
+		return token, nil
+	}
+	return "", errors.New("ngrok authtoken is required. Provide it at the prompt or set the NGROK_AUTHTOKEN environment variable")
 }
