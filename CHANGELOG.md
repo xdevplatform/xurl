@@ -4,6 +4,10 @@ All user-visible bugs and enhancements should be recorded here.
 
 ## Unreleased
 
+### Fixed
+
+- `xurl webhook start` no longer hangs when no ngrok authtoken is available. A blank prompt with `NGROK_AUTHTOKEN` unset is an error that says how to supply one, every failed connection attempt is printed (the ngrok SDK retries most failures, an invalid authtoken among them, without reporting them), and a new `--connect-timeout` (default 30s) turns a tunnel that never comes up into an error instead of an endless wait.
+
 ## v1.3.4 - 2026-09-29
 
 ### Fixed
