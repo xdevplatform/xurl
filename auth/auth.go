@@ -659,8 +659,12 @@ func generateTimestamp() string {
 	return fmt.Sprintf("%d", time.Now().Unix())
 }
 
+// encode percent-encodes s as required by RFC 5849 section 3.6: only the
+// unreserved characters (ALPHA, DIGIT, "-", ".", "_", "~") are left as is.
+// url.QueryEscape writes a space as "+", which is form encoding, not RFC 3986,
+// so the space is rewritten to "%20". A literal "+" is already "%2B" here.
 func encode(s string) string {
-	return url.QueryEscape(s)
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 func generateCodeVerifierAndChallenge() (string, string, error) {
