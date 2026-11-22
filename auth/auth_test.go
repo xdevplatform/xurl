@@ -124,7 +124,7 @@ func TestEncode(t *testing.T) {
 		expected string
 	}{
 		{"abc", "abc"},
-		{"a b c", "a+b+c"},
+		{"a b c", "a%20b%20c"},
 		{"a+b+c", "a%2Bb%2Bc"},
 		{"a/b/c", "a%2Fb%2Fc"},
 		{"a?b=c", "a%3Fb%3Dc"},
@@ -808,4 +808,23 @@ func TestHeadlessLoginRejectsStateMismatch(t *testing.T) {
 	_, err = hl.Complete("http://localhost:8080/callback?state=bogus&code=abc")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "state mismatch")
+}
+
+// Signature example from the X developer docs ("Creating a signature"),
+// which follows RFC 5849 section 3.4. The status parameter contains spaces.
+func TestGenerateSignatureDocumentedExample(t *testing.T) {
+	params := map[string]string{
+		"include_entities":       "true",
+		"status":                 "Hello Ladies + Gentlemen, a signed OAuth request!",
+		"oauth_consumer_key":     "xvz1evFS4wEEPTGEFPHBog",
+		"oauth_nonce":            "kYjzVBB8Y0ZFabxSWbWovY3uYSQ2pTgmZeNu2VS4cg",
+		"oauth_signature_method": "HMAC-SHA1",
+		"oauth_timestamp":        "1318622958",
+		"oauth_token":            "370773112-GmHxMAgYyLbNEtIKZeRNFsMKPR9EyMZeS9weJAEb",
+		"oauth_version":          "1.0",
+	}
+	sig, err := generateSignature("POST", "https://api.twitter.com/1.1/statuses/update.json", params,
+		"kAcSOqF21Fu85e7zjz7ZN2U4ZRhfV3WpwPAoE3Z7kBw", "LswwdoUaIvS8ltyTt5jkRh4J50vUPVVHtR2YPi5kE")
+	assert.NoError(t, err)
+	assert.Equal(t, "hCtSmYh+iHYCEqBWrE7C7hYmtUk=", sig)
 }
