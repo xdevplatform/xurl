@@ -301,6 +301,13 @@ func (c *ApiClient) buildBaseRequest(method, endpoint string, body io.Reader, co
 		return nil, xurlErrors.NewHTTPError(err)
 	}
 
+	// Send the query string in the encoding the OAuth 1.0a signature covers. X
+	// rejects a signed request whose query carries a raw reserved character,
+	// such as the colon in query=from:XDevelopers.
+	if req.URL.RawQuery != "" {
+		req.URL.RawQuery = strings.ReplaceAll(req.URL.Query().Encode(), "+", "%20")
+	}
+
 	// Add headers
 	for _, header := range headers {
 		parts := strings.SplitN(header, ":", 2)
@@ -320,7 +327,7 @@ func (c *ApiClient) buildBaseRequest(method, endpoint string, body io.Reader, co
 	// opts into unauthenticated requests (allowUnauthenticated, set only by
 	// library/test constructors), where we proceed and let the server decide.
 	if req.Header.Get("Authorization") == "" {
-		authHeader, err := c.getAuthHeader(httpMethod, url, authType, username)
+		authHeader, err := c.getAuthHeader(httpMethod, req.URL.String(), authType, username)
 		if err != nil {
 			if !c.allowUnauthenticated {
 				return nil, err

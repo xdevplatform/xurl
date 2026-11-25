@@ -659,8 +659,10 @@ func generateTimestamp() string {
 	return fmt.Sprintf("%d", time.Now().Unix())
 }
 
+// encode percent-encodes s as OAuth 1.0a requires (RFC 5849, section 3.6):
+// every byte except the unreserved characters, with a space as %20, not +.
 func encode(s string) string {
-	return url.QueryEscape(s)
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 func generateCodeVerifierAndChallenge() (string, string, error) {

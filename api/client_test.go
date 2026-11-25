@@ -123,6 +123,14 @@ func TestBuildRequest(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "Query is sent percent-encoded as it is signed",
+			method:     "GET",
+			endpoint:   "/2/tweets/search/recent?query=from:XDevelopers+-is:retweet&max_results=10",
+			authType:   "app",
+			wantMethod: "GET",
+			wantURL:    "https://api.x.com/2/tweets/search/recent?max_results=10&query=from%3AXDevelopers%20-is%3Aretweet",
+		},
+		{
 			name:       "Absolute URL",
 			method:     "GET",
 			endpoint:   "https://api.x.com/2/tweets/search/stream",
