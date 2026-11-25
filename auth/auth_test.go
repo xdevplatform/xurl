@@ -124,7 +124,8 @@ func TestEncode(t *testing.T) {
 		expected string
 	}{
 		{"abc", "abc"},
-		{"a b c", "a+b+c"},
+		{"a b c", "a%20b%20c"},
+		{"from:XDevelopers", "from%3AXDevelopers"},
 		{"a+b+c", "a%2Bb%2Bc"},
 		{"a/b/c", "a%2Fb%2Fc"},
 		{"a?b=c", "a%3Fb%3Dc"},
@@ -137,6 +138,27 @@ func TestEncode(t *testing.T) {
 			assert.Equal(t, tc.expected, result, "encode(%q) should return %q", tc.input, result)
 		})
 	}
+}
+
+// TestGenerateSignature checks the worked example in X's "Creating a
+// signature" guide, whose status contains spaces.
+func TestGenerateSignature(t *testing.T) {
+	params := map[string]string{
+		"status":                 "Hello Ladies + Gentlemen, a signed OAuth request!",
+		"include_entities":       "true",
+		"oauth_consumer_key":     "xvz1evFS4wEEPTGEFPHBog",
+		"oauth_nonce":            "kYjzVBB8Y0ZFabxSWbWovY3uYSQ2pTgmZeNu2VS4cg",
+		"oauth_signature_method": "HMAC-SHA1",
+		"oauth_timestamp":        "1318622958",
+		"oauth_token":            "370773112-GmHxMAgYyLbNEtIKZeRNFsMKPR9EyMZeS9weJAEb",
+		"oauth_version":          "1.0",
+	}
+
+	signature, err := generateSignature("POST", "https://api.twitter.com/1.1/statuses/update.json", params,
+		"kAcSOqF21Fu85e7zjz7ZN2U4ZRhfV3WpwPAoE3Z7kBw", "LswwdoUaIvS8ltyTt5jkRh4J50vUPVVHtR2YPi5kE")
+
+	require.NoError(t, err)
+	assert.Equal(t, "hCtSmYh+iHYCEqBWrE7C7hYmtUk=", signature)
 }
 
 func TestGenerateCodeVerifierAndChallenge(t *testing.T) {
