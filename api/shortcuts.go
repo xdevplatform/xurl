@@ -164,7 +164,7 @@ func ReadPost(client Client, postID string, opts RequestOptions) (json.RawMessag
 	postID = ResolvePostID(postID)
 
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/tweets/%s?tweet.fields=created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets,entities,attachments&expansions=author_id,referenced_tweets.id&user.fields=username,name,verified", postID)
+	opts.Endpoint = fmt.Sprintf("/2/tweets/%s?tweet.fields=created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,referenced_tweets.id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", postID)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -178,7 +178,7 @@ func SearchPosts(client Client, query string, maxResults int, opts RequestOption
 	maxResults = clampResults(maxResults, 10, 100)
 
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/tweets/search/recent?query=%s&max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name,verified", q, maxResults)
+	opts.Endpoint = fmt.Sprintf("/2/tweets/search/recent?query=%s&max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", q, maxResults)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -208,7 +208,7 @@ func LookupUser(client Client, username string, opts RequestOptions) (json.RawMe
 func GetUserPosts(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
 	maxResults = clampResults(maxResults, 5, 100)
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/tweets?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=referenced_tweets.id", userID, maxResults)
+	opts.Endpoint = fmt.Sprintf("/2/users/%s/tweets?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,referenced_tweets.id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", userID, maxResults)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -219,7 +219,7 @@ func GetUserPosts(client Client, userID string, maxResults int, opts RequestOpti
 func GetTimeline(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
 	maxResults = clampResults(maxResults, 1, 100)
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/timelines/reverse_chronological?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
+	opts.Endpoint = fmt.Sprintf("/2/users/%s/timelines/reverse_chronological?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", userID, maxResults)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -229,7 +229,7 @@ func GetTimeline(client Client, userID string, maxResults int, opts RequestOptio
 func GetMentions(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
 	maxResults = clampResults(maxResults, 5, 100)
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/mentions?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
+	opts.Endpoint = fmt.Sprintf("/2/users/%s/mentions?max_results=%d&tweet.fields=created_at,public_metrics,conversation_id,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", userID, maxResults)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -311,7 +311,7 @@ func Unbookmark(client Client, userID, postID string, opts RequestOptions) (json
 func GetBookmarks(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
 	maxResults = clampResults(maxResults, 1, 100)
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/bookmarks?max_results=%d&tweet.fields=created_at,public_metrics,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
+	opts.Endpoint = fmt.Sprintf("/2/users/%s/bookmarks?max_results=%d&tweet.fields=created_at,public_metrics,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", userID, maxResults)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
@@ -387,7 +387,7 @@ func GetDMEvents(client Client, maxResults int, opts RequestOptions) (json.RawMe
 func GetLikedPosts(client Client, userID string, maxResults int, opts RequestOptions) (json.RawMessage, error) {
 	maxResults = clampResults(maxResults, 5, 100)
 	opts.Method = "GET"
-	opts.Endpoint = fmt.Sprintf("/2/users/%s/liked_tweets?max_results=%d&tweet.fields=created_at,public_metrics,entities&expansions=author_id&user.fields=username,name", userID, maxResults)
+	opts.Endpoint = fmt.Sprintf("/2/users/%s/liked_tweets?max_results=%d&tweet.fields=created_at,public_metrics,entities,attachments,text,note_tweet,article,author_id&expansions=author_id,attachments.media_keys,article.cover_media,article.media_entities&user.fields=username,name,verified,profile_image_url&media.fields=url,preview_image_url,type,variants", userID, maxResults)
 	opts.Data = ""
 
 	return client.SendRequest(opts)
